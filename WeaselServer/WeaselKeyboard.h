@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <atltypes.h>
+
 #include <KeyEvent.h>
 #include <WeaselIPCData.h>
 #include <algorithm>
