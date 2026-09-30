@@ -512,7 +512,10 @@ LRESULT WeaselKeyboard::OnMouseMove(UINT, WPARAM, LPARAM, BOOL&) {
   const int delta_phys = m_drag_start.y - cur.y;
   const int delta96 = (int)std::lround(delta_phys * 96.0 / (double)m_dpi);
   int height = m_drag_start_h + delta96;
-  height = std::max(kMinHeight96, std::min(kMaxHeight96, height));
+  if (height < kMinHeight96)
+    height = kMinHeight96;
+  else if (height > kMaxHeight96)
+    height = kMaxHeight96;
   if (height != m_height96) {
     m_height96 = height;
     Reposition();
@@ -967,8 +970,10 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
     if (!def.is_fn && !pressed && !voice_space) {
       Gdiplus::GraphicsPath border_path;
       _AddRoundedRectPath(border_path, rect, key_radius);
-      Gdiplus::Pen border_pen(kColorKeyBorder,
-                              (Gdiplus::REAL)std::max(1, _Scaled(1)));
+      int border_width = _Scaled(1);
+      if (border_width < 1)
+        border_width = 1;
+      Gdiplus::Pen border_pen(kColorKeyBorder, (Gdiplus::REAL)border_width);
       g.DrawPath(&border_pen, &border_path);
     }
 
