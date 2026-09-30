@@ -9,6 +9,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-22.04
@@ -41,7 +45,7 @@ jobs:
       SDKVER: 10.0.19041.0
     strategy:
       matrix:
-        variant: [msbuild, xmake]
+        variant: [msbuild]
     steps:
       - name: Checkout last commit
         uses: actions/checkout@v4
@@ -71,7 +75,7 @@ jobs:
         shell: bash
         run: |
           ./install_boost.bat
-          ./build.bat boost arm64
+          ./build.bat boost
 
       - uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -140,9 +144,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ('${{ matrix.variant }}' -eq 'msbuild') {
-            .\build.bat arm64 installer
+            .\build.bat installer
           } else {
-            .\xbuild.bat arm64 installer
+            .\xbuild.bat installer
           }
 
       - name: Compress Debug Symbols
