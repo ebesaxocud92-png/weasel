@@ -171,6 +171,11 @@ class Server {
   // requested from a pipe worker thread.
   void SetTrayRefreshCallback(std::function<void()> callback);
 
+  // Run an action with exclusive access to the request handler, serialized
+  // with pipe request processing. Used by in-server components (e.g. the
+  // soft keyboard) to reach the engine safely.
+  void InvokeHandlerAction(std::function<void()> const& action);
+
  private:
   ServerImpl* m_pImpl;
 };

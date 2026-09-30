@@ -198,6 +198,11 @@ int ServerImpl::Run() {
   return nRet;
 }
 
+void ServerImpl::InvokeHandlerAction(std::function<void()> const& action) {
+  std::lock_guard guard(g_api_mutex);
+  action();
+}
+
 DWORD ServerImpl::OnEcho(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam) {
   if (!m_pRequestHandler)
     return 0;
@@ -481,6 +486,10 @@ void Server::AddMenuHandler(UINT uID, CommandHandler handler) {
 
 void Server::SetTrayRefreshCallback(std::function<void()> callback) {
   m_pImpl->SetTrayRefreshCallback(callback);
+}
+
+void Server::InvokeHandlerAction(std::function<void()> const& action) {
+  m_pImpl->InvokeHandlerAction(action);
 }
 
 HWND Server::GetHWnd() {

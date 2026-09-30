@@ -93,6 +93,7 @@ class ServerImpl : public CWindowImpl<ServerImpl, CWindow, ServerWinTraits>
   void SetTrayRefreshCallback(std::function<void()> callback) {
     m_trayRefreshCallback = callback;
   }
+  void InvokeHandlerAction(std::function<void()> const& action);
 
  private:
   void _Finailize();

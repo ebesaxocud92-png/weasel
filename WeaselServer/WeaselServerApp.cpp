@@ -32,7 +32,37 @@ int WeaselServerApp::Run() {
   m_handler->Initialize();
   m_handler->OnUpdateUI([this]() { tray_icon.RequestRefresh(); });
 
+  m_keyboard.Create(m_server.GetHWnd());
+  m_keyboard.SetKeyHandler([this](weasel::KeyEvent const& key_event) {
+    BOOL handled = FALSE;
+    bool flush = false;
+    m_server.InvokeHandlerAction([&]() {
+      handled = m_handler->ProcessKeyEventFromKeyboard(key_event);
+      flush = m_handler->HasDeferredCommit();
+    });
+    if (flush)
+      WeaselKeyboard::FlushToClient();
+    return handled != FALSE;
+  });
+  m_keyboard.SetSelectHandler([this](size_t index) {
+    m_server.InvokeHandlerAction(
+        [&]() { m_handler->SelectCandidateOnCurrentPage(index, 0); });
+    WeaselKeyboard::FlushToClient();
+  });
+  m_keyboard.SetModeToggleHandler([this](bool ascii_mode) {
+    m_server.InvokeHandlerAction(
+        [&]() { m_handler->SetOption(0, "ascii_mode", !ascii_mode); });
+  });
+  m_handler->SetKeyboardUpdateCallback([this](WeaselSessionId session_id,
+                                              const weasel::Context& ctx,
+                                              const weasel::Status& status) {
+    m_keyboard.OnEngineUpdate(session_id, ctx, status);
+  });
+  m_keyboard.Show();
+
   tray_icon.Create(m_server.GetHWnd());
+  tray_icon.SetSoftKeyboardVisibleQuery(
+      [this]() { return m_keyboard.IsVisible(); });
   m_server.SetTrayRefreshCallback([this]() { tray_icon.ApplyRefresh(); });
   tray_icon.RequestRefresh();
 
@@ -49,6 +79,10 @@ int WeaselServerApp::Run() {
 
 void WeaselServerApp::SetupMenuHandlers() {
   std::filesystem::path dir = install_dir();
+  m_server.AddMenuHandler(ID_WEASELTRAY_SOFTKEYBOARD, [this] {
+    m_keyboard.ToggleShow();
+    return true;
+  });
   m_server.AddMenuHandler(ID_WEASELTRAY_QUIT,
                           [this] { return m_server.Stop() == 0; });
   m_server.AddMenuHandler(ID_WEASELTRAY_DEPLOY,

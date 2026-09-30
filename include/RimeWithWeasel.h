@@ -45,6 +45,18 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   virtual BOOL ProcessKeyEvent(weasel::KeyEvent keyEvent,
                                WeaselSessionId ipc_id,
                                EatLine eat);
+  // Process a key event that originates from the in-server soft keyboard.
+  // A commit produced by the key is deferred and delivered to the client on
+  // its next response pull. Pass 0 to use the active session.
+  BOOL ProcessKeyEventFromKeyboard(weasel::KeyEvent keyEvent,
+                                   WeaselSessionId ipc_id = 0);
+  bool HasDeferredCommit() const { return !m_pending_async_commit.empty(); }
+  // Notify an in-server UI (e.g. the soft keyboard) about context updates.
+  using KeyboardUpdateCallback = std::function<
+      void(WeaselSessionId, const weasel::Context&, const weasel::Status&)>;
+  void SetKeyboardUpdateCallback(KeyboardUpdateCallback const& cb) {
+    _KeyboardUpdateCallback = cb;
+  }
   virtual void CommitComposition(WeaselSessionId ipc_id);
   virtual void ClearComposition(WeaselSessionId ipc_id);
   virtual void SelectCandidateOnCurrentPage(size_t index,
@@ -105,6 +117,10 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   std::map<std::string, bool> m_show_notifications;
   std::map<std::string, bool> m_show_notifications_base;
   std::function<void()> _UpdateUICallback;
+  KeyboardUpdateCallback _KeyboardUpdateCallback;
+  bool m_keyboard_flush;
+  std::wstring m_pending_async_commit;
+  WeaselSessionId m_pending_async_commit_session;
 
   static void OnNotify(void* context_object,
                        uintptr_t session_id,

@@ -72,6 +72,11 @@ class WeaselTrayIcon : public CSystemTray {
   // Runs on the server message thread (no g_api_mutex held).
   void ApplyRefresh();
 
+  // Query used to show the soft keyboard visibility in the tray menu.
+  void SetSoftKeyboardVisibleQuery(std::function<bool()> query) {
+    m_soft_keyboard_visible = std::move(query);
+  }
+
  protected:
   virtual void CustomizeMenu(HMENU hMenu);
 
@@ -91,4 +96,5 @@ class WeaselTrayIcon : public CSystemTray {
   WeaselTrayIconState m_pending_state;
   std::mutex m_state_mutex;
   std::condition_variable m_state_cv;
+  std::function<bool()> m_soft_keyboard_visible;
 };

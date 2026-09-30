@@ -17,7 +17,12 @@ WeaselTrayIcon::WeaselTrayIcon(weasel::UI& ui)
       m_schema_ascii_icon(),
       m_disabled(false) {}
 
-void WeaselTrayIcon::CustomizeMenu(HMENU hMenu) {}
+void WeaselTrayIcon::CustomizeMenu(HMENU hMenu) {
+  if (m_soft_keyboard_visible && m_soft_keyboard_visible()) {
+    ::CheckMenuItem(hMenu, ID_WEASELTRAY_SOFTKEYBOARD,
+                    MF_BYCOMMAND | MF_CHECKED);
+  }
+}
 
 BOOL WeaselTrayIcon::Create(HWND hTargetWnd) {
   HMODULE hModule = GetModuleHandle(NULL);

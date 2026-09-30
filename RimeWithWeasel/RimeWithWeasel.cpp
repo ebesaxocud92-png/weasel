@@ -41,6 +41,8 @@ RimeWithWeaselHandler::RimeWithWeaselHandler(UI* ui)
       m_current_dark_mode(false),
       m_global_ascii_mode(false),
       m_show_notifications_time(1200),
+      m_keyboard_flush(false),
+      m_pending_async_commit_session(0),
       _UpdateUICallback(NULL) {
   m_ui->InServer() = true;
   rime_api = rime_get_api();
@@ -291,6 +293,20 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
   return (BOOL)handled;
 }
 
+BOOL RimeWithWeaselHandler::ProcessKeyEventFromKeyboard(
+    weasel::KeyEvent keyEvent,
+    WeaselSessionId ipc_id) {
+  if (!ipc_id)
+    ipc_id = m_active_session;
+  if (!ipc_id)
+    return FALSE;
+  m_keyboard_flush = true;
+  auto eat = [](std::wstring&) { return true; };
+  BOOL handled = ProcessKeyEvent(keyEvent, ipc_id, eat);
+  m_keyboard_flush = false;
+  return handled;
+}
+
 void RimeWithWeaselHandler::CommitComposition(WeaselSessionId ipc_id) {
   DLOG(INFO) << "Commit composition: ipc_id = " << ipc_id;
   if (m_disabled)
@@ -315,6 +331,10 @@ void RimeWithWeaselHandler::SelectCandidateOnCurrentPage(
   DLOG(INFO) << "select candidate on current page, ipc_id = " << ipc_id
              << ", index = " << index;
   if (m_disabled)
+    return;
+  if (!ipc_id)
+    ipc_id = m_active_session;
+  if (!ipc_id)
     return;
   rime_api->select_candidate_on_current_page(to_session_id(ipc_id), index);
 }
@@ -533,6 +553,9 @@ void RimeWithWeaselHandler::_UpdateUI(WeaselSessionId ipc_id) {
 
   _GetStatus(weasel_status, ipc_id, weasel_context);
 
+  if (_KeyboardUpdateCallback)
+    _KeyboardUpdateCallback(ipc_id, weasel_context, weasel_status);
+
   SessionStatus& session_status = get_session_status(ipc_id);
   if (rime_api->get_option(session_id, "inline_preedit"))
     session_status.style.client_caps |= INLINE_PREEDIT_CAPABLE;
@@ -748,10 +771,24 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
   RimeSessionId session_id = session_status.session_id;
   RIME_STRUCT(RimeCommit, commit);
   if (rime_api->get_commit(session_id, &commit)) {
-    actions.push_back("commit");
     std::wstring commit_text_w = escape_string(u8tow(commit.text));
-    body.append(L"commit=").append(commit_text_w).append(L"\n");
+    if (m_keyboard_flush) {
+      // Soft keyboard commits are deferred: they reach the client on the
+      // response pull triggered by the keyboard's flush key event.
+      m_pending_async_commit.append(commit_text_w);
+      m_pending_async_commit_session = ipc_id;
+    } else {
+      actions.push_back("commit");
+      body.append(L"commit=").append(commit_text_w).append(L"\n");
+    }
     rime_api->free_commit(&commit);
+  }
+  if (!m_keyboard_flush && !m_pending_async_commit.empty() &&
+      m_pending_async_commit_session == ipc_id) {
+    actions.push_back("commit");
+    body.append(L"commit=").append(m_pending_async_commit).append(L"\n");
+    m_pending_async_commit.clear();
+    m_pending_async_commit_session = 0;
   }
 
   bool is_composing = false;
