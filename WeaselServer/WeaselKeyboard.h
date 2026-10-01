@@ -35,6 +35,12 @@ class WeaselKeyboard
     TIMER_HINT = 2,
   };
 
+  enum ToolButton {
+    TOOL_CLIPBOARD = 0,
+    TOOL_EDIT,
+    TOOL_VOICE,
+  };
+
   BEGIN_MSG_MAP(WeaselKeyboard)
   MESSAGE_HANDLER(WM_CREATE, OnCreate)
   MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
@@ -45,6 +51,7 @@ class WeaselKeyboard
   MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
   MESSAGE_HANDLER(WM_SETCURSOR, OnSetCursor)
   MESSAGE_HANDLER(WM_MOUSEACTIVATE, OnMouseActivate)
+  MESSAGE_HANDLER(WM_TOUCH, OnTouch)
   MESSAGE_HANDLER(WM_TIMER, OnTimer)
   MESSAGE_HANDLER(WM_SIZE, OnSize)
   MESSAGE_HANDLER(WM_DISPLAYCHANGE, OnDisplayChange)
@@ -72,6 +79,21 @@ class WeaselKeyboard
   void SetModeToggleHandler(std::function<void(bool)> handler) {
     m_mode_toggle_handler = std::move(handler);
   }
+  // Toolbar buttons above the letter rows (clipboard / edit / voice).
+  void SetToolHandler(std::function<void(int)> handler) {
+    m_tool_handler = std::move(handler);
+  }
+  // Called when the dismiss key is tapped (default: hide the keyboard).
+  void SetDismissHandler(std::function<void()> handler) {
+    m_dismiss_handler = std::move(handler);
+  }
+  HWND Hwnd() const { return m_hWnd; }
+  // Show a transient hint in the candidate strip; auto-clears after a while.
+  void ShowHint(const std::wstring& hint);
+
+  // Inject a Ctrl+key combination into the focused application. Also used by
+  // the tool panel (cut/copy/paste/select all).
+  static void SendCtrlKey(WORD vk);
 
   // Thread-safe: may be called from IPC worker threads.
   void OnEngineUpdate(DWORD session_id,
@@ -97,6 +119,7 @@ class WeaselKeyboard
                           WPARAM wParam,
                           LPARAM lParam,
                           BOOL& bHandled);
+  LRESULT OnTouch(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
   LRESULT OnTimer(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
   LRESULT OnSize(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
   LRESULT OnDisplayChange(UINT uMsg,
@@ -128,22 +151,30 @@ class WeaselKeyboard
   void _ReleaseBackBuffer();
   void _ActivateKey(int key_index);
   void _InjectKey(const KeyDef& def, bool shift);
-  void _SendCtrlKey(WORD vk);
+  // Shared press handling for mouse and touch input.
+  void _PointerDown(CPoint pt);
+  void _PointerUp(CPoint pt);
+  void _PointerMove();
   int _KeyAt(CPoint pt) const;
   int _CandidateAt(CPoint pt) const;
+  int _ToolAt(CPoint pt) const;
   bool _CurrentAsciiMode() const;
   void _Draw(Gdiplus::Graphics& g, const CRect& rc);
 
   std::vector<KeyLayout> m_keys;
   std::vector<std::pair<CRect, size_t>> m_candidate_rects;
-  CRect m_mode_rect;
+  std::vector<std::pair<CRect, int>> m_toolbar_rects;
   CRect m_grip_rect;
+  CRect m_dismiss_rect;
   int m_grip_h = 0;
   int m_strip_h = 0;
+  int m_toolbar_h = 0;
 
   std::function<bool(weasel::KeyEvent const&)> m_key_handler;
   std::function<void(size_t)> m_select_handler;
   std::function<void(bool)> m_mode_toggle_handler;
+  std::function<void(int)> m_tool_handler;
+  std::function<void()> m_dismiss_handler;
 
   mutable std::mutex m_data_mutex;
   weasel::Context m_ctx;
@@ -158,13 +189,18 @@ class WeaselKeyboard
 
   UINT m_dpi = 96;
   bool m_shift = false;
-  bool m_select = false;
   bool m_voice_active = false;
   int m_pressed_key = -1;
   int m_pressed_candidate = -1;
-  bool m_pressed_mode = false;
+  int m_pressed_tool = -1;
+  bool m_pressed_dismiss = false;
   UINT_PTR m_longpress_timer = 0;
   UINT_PTR m_hint_timer = 0;
+
+  // Touch handling: the window is registered as a touch window so Windows
+  // does not turn press-and-hold into a right-click gesture on the keys.
+  bool m_touch_active = false;
+  DWORD m_touch_id = 0;
 
   // Back buffer for layered rendering.
   HBITMAP m_back_dib = nullptr;

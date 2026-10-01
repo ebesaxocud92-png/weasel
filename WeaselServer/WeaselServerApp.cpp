@@ -58,7 +58,51 @@ int WeaselServerApp::Run() {
                                               const weasel::Status& status) {
     m_keyboard.OnEngineUpdate(session_id, ctx, status);
   });
-  m_keyboard.Show();
+
+  // The tool panel shares the keyboard's engine entry point (edit keys may
+  // need candidate navigation while composing).
+  m_tool_panel.Create(m_server.GetHWnd());
+  m_tool_panel.SetAnchorWindow(m_keyboard.Hwnd());
+  m_tool_panel.SetKeyHandler([this](weasel::KeyEvent const& key_event) {
+    BOOL handled = FALSE;
+    m_server.InvokeHandlerAction(
+        [&]() { handled = m_handler->ProcessKeyEventFromKeyboard(key_event); });
+    return handled != FALSE;
+  });
+
+  m_keyboard.SetToolHandler([this](int tool) {
+    switch (tool) {
+      case WeaselKeyboard::TOOL_CLIPBOARD:
+        m_tool_panel.Toggle(WeaselToolPanel::PAGE_CLIPBOARD);
+        break;
+      case WeaselKeyboard::TOOL_EDIT:
+        m_tool_panel.Toggle(WeaselToolPanel::PAGE_EDIT);
+        break;
+      case WeaselKeyboard::TOOL_VOICE:
+        m_keyboard.ShowHint(L"语音输入开发中，即将上线");
+        break;
+      default:
+        break;
+    }
+  });
+  m_keyboard.SetDismissHandler([this]() {
+    m_keyboard_suppressed = true;
+    m_tool_panel.Hide();
+    m_keyboard.Hide();
+  });
+
+  // Phone-style auto show/hide: the keyboard appears when a text field gains
+  // focus and hides when focus leaves (tapping the desktop, switching apps).
+  m_handler->SetFocusCallback([this](bool focused) {
+    if (focused) {
+      if (!m_keyboard_suppressed)
+        m_keyboard.Show();
+    } else {
+      m_keyboard_suppressed = false;
+      m_tool_panel.Hide();
+      m_keyboard.Hide();
+    }
+  });
 
   tray_icon.Create(m_server.GetHWnd());
   tray_icon.SetSoftKeyboardVisibleQuery(
@@ -80,7 +124,14 @@ int WeaselServerApp::Run() {
 void WeaselServerApp::SetupMenuHandlers() {
   std::filesystem::path dir = install_dir();
   m_server.AddMenuHandler(ID_WEASELTRAY_SOFTKEYBOARD, [this] {
-    m_keyboard.ToggleShow();
+    if (m_keyboard.IsVisible()) {
+      m_keyboard_suppressed = true;
+      m_tool_panel.Hide();
+      m_keyboard.Hide();
+    } else {
+      m_keyboard_suppressed = false;
+      m_keyboard.Show();
+    }
     return true;
   });
   m_server.AddMenuHandler(ID_WEASELTRAY_QUIT,

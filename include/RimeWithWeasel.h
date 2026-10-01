@@ -57,6 +57,9 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   void SetKeyboardUpdateCallback(KeyboardUpdateCallback const& cb) {
     _KeyboardUpdateCallback = cb;
   }
+  // Fired when the IME gains/loses text focus (drives keyboard auto show/hide).
+  using FocusCallback = std::function<void(bool focused)>;
+  void SetFocusCallback(FocusCallback const& cb) { _FocusCallback = cb; }
   virtual void CommitComposition(WeaselSessionId ipc_id);
   virtual void ClearComposition(WeaselSessionId ipc_id);
   virtual void SelectCandidateOnCurrentPage(size_t index,
@@ -118,6 +121,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   std::map<std::string, bool> m_show_notifications_base;
   std::function<void()> _UpdateUICallback;
   KeyboardUpdateCallback _KeyboardUpdateCallback;
+  FocusCallback _FocusCallback;
   bool m_keyboard_flush;
   std::wstring m_pending_async_commit;
   WeaselSessionId m_pending_async_commit_session;

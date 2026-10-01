@@ -368,12 +368,16 @@ void RimeWithWeaselHandler::FocusIn(DWORD client_caps, WeaselSessionId ipc_id) {
              << ", client_caps = " << client_caps;
   if (m_disabled)
     return;
+  if (_FocusCallback)
+    _FocusCallback(true);
   _UpdateUI(ipc_id);
   m_active_session = ipc_id;
 }
 
 void RimeWithWeaselHandler::FocusOut(DWORD param, WeaselSessionId ipc_id) {
   DLOG(INFO) << "Focus out: ipc_id = " << ipc_id;
+  if (_FocusCallback)
+    _FocusCallback(false);
   if (m_ui)
     m_ui->Hide();
   m_active_session = 0;

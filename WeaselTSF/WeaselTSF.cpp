@@ -186,6 +186,9 @@ STDMETHODIMP WeaselTSF::OnSetThreadFocus() {
 }
 STDMETHODIMP WeaselTSF::OnKillThreadFocus() {
   _AbortComposition();
+  // Let the server know the client lost text focus so it can auto-hide the
+  // soft keyboard (tapping the desktop, switching apps, etc.).
+  m_client.FocusOut();
   return S_OK;
 }
 BOOL WeaselTSF::_InitThreadFocusSink() {

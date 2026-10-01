@@ -19,10 +19,6 @@ enum KeyAction {
   KEY_ENTER,
   KEY_TOGGLE_MODE,
   KEY_SPACE,
-  KEY_ARROW,
-  KEY_SELECT,
-  KEY_COPY,
-  KEY_PASTE,
 };
 
 struct KeyDef {
@@ -73,18 +69,9 @@ const KeyDef kRow3[] = {
     {L"Del", 0, VK_BACK, KEY_BACKSPACE, 1.5f, true},
 };
 
-// Edit row: selection toggle, arrow keys, clipboard.
+// The main key face follows the phone keyboard convention: three letter rows
+// and a bottom function row. Edit/clipboard tools live in the toolbar above.
 const KeyDef kRow4[] = {
-    {L"选", 0, 0, KEY_SELECT, 1.0f, true},
-    {L"", ibus::Left, VK_LEFT, KEY_ARROW, 1.0f, true},
-    {L"", ibus::Up, VK_UP, KEY_ARROW, 1.0f, true},
-    {L"", ibus::Down, VK_DOWN, KEY_ARROW, 1.0f, true},
-    {L"", ibus::Right, VK_RIGHT, KEY_ARROW, 1.0f, true},
-    {L"复制", 0, 0, KEY_COPY, 1.25f, true},
-    {L"粘贴", 0, 0, KEY_PASTE, 1.25f, true},
-};
-
-const KeyDef kRow5[] = {
     {L"中", 0, 0, KEY_TOGGLE_MODE, 1.1f, true},
     {L"，", 0x2C, VK_OEM_COMMA, KEY_NORMAL, 1.0f, true},
     {L"按住说话", 0x20, VK_SPACE, KEY_SPACE, 5.0f, false},
@@ -98,9 +85,10 @@ struct RowDef {
 };
 
 const RowDef kRows[] = {
-    {kRow1, ARRAYSIZE(kRow1)}, {kRow2, ARRAYSIZE(kRow2)},
-    {kRow3, ARRAYSIZE(kRow3)}, {kRow4, ARRAYSIZE(kRow4)},
-    {kRow5, ARRAYSIZE(kRow5)},
+    {kRow1, ARRAYSIZE(kRow1)},
+    {kRow2, ARRAYSIZE(kRow2)},
+    {kRow3, ARRAYSIZE(kRow3)},
+    {kRow4, ARRAYSIZE(kRow4)},
 };
 
 const KeyDef& _DefById(int id) {
@@ -182,42 +170,6 @@ float _MeasureText(Gdiplus::Graphics& g,
   g.MeasureString(text.c_str(), (INT)text.size(), font, Gdiplus::PointF(0, 0),
                   &format, &bounds);
   return bounds.Width;
-}
-
-void _DrawChevron(Gdiplus::Graphics& g,
-                  const CRect& rc,
-                  UINT ibus_code,
-                  const Gdiplus::Color& color,
-                  float scale) {
-  const float cx = ((float)rc.left + (float)rc.right) / 2.0f;
-  const float cy = ((float)rc.top + (float)rc.bottom) / 2.0f;
-  const float s = 5.5f * scale;
-  Gdiplus::Pen pen(color, 2.2f * scale);
-  pen.SetStartCap(Gdiplus::LineCapRound);
-  pen.SetEndCap(Gdiplus::LineCapRound);
-  pen.SetLineJoin(Gdiplus::LineJoinRound);
-  Gdiplus::GraphicsPath path;
-  switch (ibus_code) {
-    case ibus::Left:
-      path.AddLine(cx + s * 0.5f, cy - s, cx - s * 0.5f, cy);
-      path.AddLine(cx - s * 0.5f, cy, cx + s * 0.5f, cy + s);
-      break;
-    case ibus::Right:
-      path.AddLine(cx - s * 0.5f, cy - s, cx + s * 0.5f, cy);
-      path.AddLine(cx + s * 0.5f, cy, cx - s * 0.5f, cy + s);
-      break;
-    case ibus::Up:
-      path.AddLine(cx - s, cy + s * 0.5f, cx, cy - s * 0.5f);
-      path.AddLine(cx, cy - s * 0.5f, cx + s, cy + s * 0.5f);
-      break;
-    case ibus::Down:
-      path.AddLine(cx - s, cy - s * 0.5f, cx, cy + s * 0.5f);
-      path.AddLine(cx, cy + s * 0.5f, cx + s, cy - s * 0.5f);
-      break;
-    default:
-      return;
-  }
-  g.DrawPath(&pen, &path);
 }
 
 const wchar_t kFontFace[] = L"Microsoft YaHei UI";
@@ -317,10 +269,18 @@ void WeaselKeyboard::Reposition() {
   mi.cbSize = sizeof(MONITORINFO);
   if (!monitor || !GetMonitorInfo(monitor, &mi))
     return;
-  const int width = mi.rcWork.right - mi.rcWork.left;
-  const int height = _Scaled(m_height96);
-  SetWindowPos(NULL, mi.rcWork.left, mi.rcWork.bottom - height, width, height,
-               SWP_NOZORDER | SWP_NOACTIVATE);
+  // Keep clear of the screen edges so Windows edge gestures (task view,
+  // action center) keep working.
+  const int margin = _Scaled(18);
+  const int work_w = mi.rcWork.right - mi.rcWork.left;
+  const int work_h = mi.rcWork.bottom - mi.rcWork.top;
+  const int width = work_w - margin * 2;
+  int height = _Scaled(m_height96);
+  // Never let the keyboard cover the whole screen.
+  if (height > work_h - _Scaled(80))
+    height = work_h - _Scaled(80);
+  SetWindowPos(NULL, mi.rcWork.left + margin, mi.rcWork.bottom - height, width,
+               height, SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void WeaselKeyboard::FlushToClient() {
@@ -353,6 +313,9 @@ LRESULT WeaselKeyboard::OnCreate(UINT, WPARAM, LPARAM, BOOL&) {
   _UpdateFonts();
   _Layout();
   Reposition();
+  // Touch-aware: Windows skips press-and-hold-to-right-click gesture
+  // recognition on this window; touch arrives as WM_TOUCH.
+  ::RegisterTouchWindow(m_hWnd, 0);
   return 0;
 }
 
@@ -361,6 +324,7 @@ LRESULT WeaselKeyboard::OnDestroy(UINT, WPARAM, LPARAM, BOOL&) {
   KillTimer(TIMER_HINT);
   m_longpress_timer = 0;
   m_hint_timer = 0;
+  ::UnregisterTouchWindow(m_hWnd);
   _ReleaseBackBuffer();
   return 0;
 }
@@ -437,43 +401,113 @@ LRESULT WeaselKeyboard::OnTimer(UINT, WPARAM wParam, LPARAM, BOOL&) {
 }
 
 LRESULT WeaselKeyboard::OnLButtonDown(UINT, WPARAM, LPARAM lParam, BOOL&) {
-  CPoint pt(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+  _PointerDown(CPoint(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)));
+  return 0;
+}
+
+LRESULT WeaselKeyboard::OnLButtonUp(UINT, WPARAM, LPARAM lParam, BOOL&) {
+  _PointerUp(CPoint(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)));
+  return 0;
+}
+
+LRESULT WeaselKeyboard::OnMouseMove(UINT, WPARAM, LPARAM, BOOL&) {
+  _PointerMove();
+  return 0;
+}
+
+LRESULT WeaselKeyboard::OnTouch(UINT, WPARAM wParam, LPARAM lParam, BOOL&) {
+  const UINT count = LOWORD(wParam);
+  if (!count)
+    return 0;
+  HTOUCHINPUT handle = reinterpret_cast<HTOUCHINPUT>(lParam);
+  std::vector<TOUCHINPUT> inputs(count);
+  if (!::GetTouchInputInfo(handle, count, inputs.data(), sizeof(TOUCHINPUT))) {
+    ::CloseTouchInputHandle(handle);
+    return 0;
+  }
+  auto client_point = [this](const TOUCHINPUT& ti) {
+    CPoint pt((int)(ti.x / 100), (int)(ti.y / 100));
+    ::ScreenToClient(m_hWnd, &pt);
+    return pt;
+  };
+  for (const TOUCHINPUT& ti : inputs) {
+    if (!m_touch_active && (ti.dwFlags & TOUCHEVENTF_DOWN)) {
+      m_touch_active = true;
+      m_touch_id = ti.dwID;
+      _PointerDown(client_point(ti));
+    } else if (m_touch_active && ti.dwID == m_touch_id) {
+      if (ti.dwFlags & TOUCHEVENTF_UP) {
+        m_touch_active = false;
+        _PointerUp(client_point(ti));
+      } else if (ti.dwFlags & TOUCHEVENTF_MOVE) {
+        _PointerMove();
+      }
+    }
+  }
+  ::CloseTouchInputHandle(handle);
+  return 0;
+}
+
+void WeaselKeyboard::_PointerDown(CPoint pt) {
   if (m_grip_rect.PtInRect(pt)) {
     m_resizing = true;
     SetCapture();
     ::GetCursorPos(&m_drag_start);
     m_drag_start_h = m_height96;
-    return 0;
+    return;
   }
   SetCapture();
+  m_pressed_dismiss = (m_dismiss_rect.PtInRect(pt) != FALSE);
+  if (m_pressed_dismiss)
+    return;
+  m_pressed_tool = _ToolAt(pt);
+  if (m_pressed_tool >= 0) {
+    _Render();
+    return;
+  }
   m_pressed_candidate = _CandidateAt(pt);
   if (m_pressed_candidate < 0) {
     m_pressed_key = _KeyAt(pt);
     if (m_pressed_key >= 0 &&
         _DefById(m_keys[m_pressed_key].id).action == KEY_SPACE) {
       m_longpress_timer = SetTimer(TIMER_LONGPRESS, 350);
-    } else if (m_pressed_key < 0) {
-      m_pressed_mode = (m_mode_rect.PtInRect(pt) != FALSE);
     }
   }
   _Render();
-  return 0;
 }
 
-LRESULT WeaselKeyboard::OnLButtonUp(UINT, WPARAM, LPARAM lParam, BOOL&) {
+void WeaselKeyboard::_PointerUp(CPoint pt) {
   if (GetCapture() == m_hWnd)
     ReleaseCapture();
   if (m_resizing) {
     m_resizing = false;
     _SaveHeight(m_height96);
     _Render();
-    return 0;
+    return;
   }
   if (m_longpress_timer) {
     KillTimer(TIMER_LONGPRESS);
     m_longpress_timer = 0;
   }
-  CPoint pt(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+  if (m_pressed_dismiss) {
+    if (m_dismiss_rect.PtInRect(pt)) {
+      if (m_dismiss_handler)
+        m_dismiss_handler();
+      else
+        Hide();
+    }
+    m_pressed_dismiss = false;
+    _Render();
+    return;
+  }
+  if (m_pressed_tool >= 0) {
+    if (_ToolAt(pt) == m_pressed_tool && m_tool_handler) {
+      m_tool_handler(m_pressed_tool);
+    }
+    m_pressed_tool = -1;
+    _Render();
+    return;
+  }
   if (m_voice_active) {
     m_voice_active = false;
     {
@@ -488,10 +522,6 @@ LRESULT WeaselKeyboard::OnLButtonUp(UINT, WPARAM, LPARAM lParam, BOOL&) {
     if (candidate == m_pressed_candidate && m_select_handler) {
       m_select_handler((size_t)candidate);
     }
-  } else if (m_pressed_mode) {
-    if (m_mode_rect.PtInRect(pt) && m_mode_toggle_handler) {
-      m_mode_toggle_handler(_CurrentAsciiMode());
-    }
   } else if (m_pressed_key >= 0) {
     if (_KeyAt(pt) == m_pressed_key) {
       _ActivateKey(m_pressed_key);
@@ -499,14 +529,12 @@ LRESULT WeaselKeyboard::OnLButtonUp(UINT, WPARAM, LPARAM lParam, BOOL&) {
   }
   m_pressed_key = -1;
   m_pressed_candidate = -1;
-  m_pressed_mode = false;
   _Render();
-  return 0;
 }
 
-LRESULT WeaselKeyboard::OnMouseMove(UINT, WPARAM, LPARAM, BOOL&) {
+void WeaselKeyboard::_PointerMove() {
   if (!m_resizing)
-    return 0;
+    return;
   CPoint cur;
   ::GetCursorPos(&cur);
   const int delta_phys = m_drag_start.y - cur.y;
@@ -520,7 +548,6 @@ LRESULT WeaselKeyboard::OnMouseMove(UINT, WPARAM, LPARAM, BOOL&) {
     m_height96 = height;
     Reposition();
   }
-  return 0;
 }
 
 LRESULT WeaselKeyboard::OnSetCursor(UINT, WPARAM, LPARAM, BOOL&) {
@@ -585,14 +612,31 @@ void WeaselKeyboard::_Layout() {
   CRect rc;
   GetClientRect(&rc);
   m_keys.clear();
+  m_toolbar_rects.clear();
   m_grip_h = _Scaled(14);
   m_strip_h = _Scaled(48);
+  m_toolbar_h = _Scaled(40);
   m_grip_rect = CRect(rc.left, rc.top, rc.right, rc.top + m_grip_h);
+  const int pad = _Scaled(8);
+  const int gap = _Scaled(8);
+  // Dismiss key sits at the left edge of the candidate strip, like the
+  // phone keyboards put it.
+  const int dismiss_w = _Scaled(40);
+  m_dismiss_rect = CRect(pad, m_grip_h + _Scaled(6), pad + dismiss_w,
+                         m_grip_h + m_strip_h - _Scaled(6));
   if (rc.Width() <= 0 || rc.Height() <= 0)
     return;
-  const int pad = _Scaled(6);
-  const int gap = _Scaled(7);
-  const int top = m_grip_h + m_strip_h;
+  // Toolbar: three small icon buttons, left-aligned.
+  const int tool_w = _Scaled(64);
+  const int tool_h = _Scaled(30);
+  const int tool_y = m_grip_h + m_strip_h + (m_toolbar_h - tool_h) / 2;
+  int tool_x = pad;
+  for (int t = 0; t < 3; ++t) {
+    m_toolbar_rects.emplace_back(
+        CRect(tool_x, tool_y, tool_x + tool_w, tool_y + tool_h), t);
+    tool_x += tool_w + gap;
+  }
+  const int top = m_grip_h + m_strip_h + m_toolbar_h;
   const int row_count = (int)ARRAYSIZE(kRows);
   const int total_gap = gap * (row_count - 1);
   int row_h = (rc.Height() - top - pad * 2 - total_gap) / row_count;
@@ -604,13 +648,19 @@ void WeaselKeyboard::_Layout() {
     float weight_sum = 0.0f;
     for (int i = 0; i < row.count; ++i)
       weight_sum += row.defs[i].weight;
-    const int avail = rc.Width() - pad * 2 - gap * (row.count - 1);
+    // Stagger the letter rows like a phone keyboard.
+    int inset = 0;
+    if (r == 1)
+      inset = rc.Width() / 28;
+    else if (r == 2)
+      inset = rc.Width() / 14;
+    const int avail = rc.Width() - (pad + inset) * 2 - gap * (row.count - 1);
     if (avail <= 0)
       return;
-    int x = pad;
+    int x = pad + inset;
     for (int i = 0; i < row.count; ++i) {
       int w = (i == row.count - 1)
-                  ? (rc.Width() - pad - x)
+                  ? (rc.Width() - pad - inset - x)
                   : (int)(avail * (row.defs[i].weight / weight_sum) + 0.5f);
       KeyLayout key;
       key.rect = CRect(x, y, x + w, y + row_h);
@@ -724,6 +774,27 @@ int WeaselKeyboard::_CandidateAt(CPoint pt) const {
   return -1;
 }
 
+int WeaselKeyboard::_ToolAt(CPoint pt) const {
+  for (const auto& entry : m_toolbar_rects) {
+    if (entry.first.PtInRect(pt))
+      return entry.second;
+  }
+  return -1;
+}
+
+void WeaselKeyboard::ShowHint(const std::wstring& hint) {
+  {
+    std::lock_guard<std::mutex> lock(m_data_mutex);
+    m_hint = hint;
+  }
+  if (m_hWnd) {
+    if (m_hint_timer)
+      ::KillTimer(m_hWnd, TIMER_HINT);
+    m_hint_timer = ::SetTimer(m_hWnd, TIMER_HINT, 1800, NULL);
+    _Render();
+  }
+}
+
 bool WeaselKeyboard::_CurrentAsciiMode() const {
   std::lock_guard<std::mutex> lock(m_data_mutex);
   return m_status.ascii_mode;
@@ -737,26 +808,16 @@ void WeaselKeyboard::_ActivateKey(int key_index) {
     case KEY_SHIFT:
       m_shift = !m_shift;
       return;
-    case KEY_SELECT:
-      m_select = !m_select;
-      return;
     case KEY_TOGGLE_MODE:
       if (m_mode_toggle_handler)
         m_mode_toggle_handler(_CurrentAsciiMode());
-      return;
-    case KEY_COPY:
-      _SendCtrlKey('C');
-      return;
-    case KEY_PASTE:
-      _SendCtrlKey('V');
       return;
     default:
       break;
   }
   weasel::KeyEvent event(def.ibus_code, 0);
   const bool is_alpha = def.ibus_code >= 'a' && def.ibus_code <= 'z';
-  const bool is_arrow = (def.action == KEY_ARROW);
-  const bool need_shift = (is_alpha && m_shift) || (is_arrow && m_select);
+  const bool need_shift = (is_alpha && m_shift);
   if (need_shift) {
     event.mask |= ibus::SHIFT_MASK;
     if (is_alpha)
@@ -793,7 +854,7 @@ void WeaselKeyboard::_InjectKey(const KeyDef& def, bool shift) {
   ::SendInput((UINT)inputs.size(), inputs.data(), sizeof(INPUT));
 }
 
-void WeaselKeyboard::_SendCtrlKey(WORD vk) {
+void WeaselKeyboard::SendCtrlKey(WORD vk) {
   std::vector<INPUT> inputs(4);
   INPUT input = {};
   input.type = INPUT_KEYBOARD;
@@ -819,8 +880,8 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
     hint = m_hint;
   }
 
-  const int pad = _Scaled(6);
-  const int gap = _Scaled(7);
+  const int pad = _Scaled(8);
+  const int gap = _Scaled(8);
   const int strip_top = m_grip_h;
   const float width = (float)rc.Width();
   const float height = (float)rc.Height();
@@ -865,24 +926,101 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
         Gdiplus::RectF(0.0f, (float)(strip_top + m_strip_h - 1), width, 1.0f));
   }
 
-  // Mode chip.
+  // Dismiss key (hide the keyboard), left edge of the candidate strip.
   {
-    const int chip_w = _Scaled(44);
-    const int chip_h = _Scaled(32);
-    const int chip_y = strip_top + (m_strip_h - chip_h) / 2;
-    m_mode_rect = CRect(pad, chip_y, pad + chip_w, chip_y + chip_h);
-    const Gdiplus::RectF rect((float)m_mode_rect.left, (float)m_mode_rect.top,
-                              (float)chip_w, (float)chip_h);
+    const Gdiplus::RectF rect(
+        (float)m_dismiss_rect.left, (float)m_dismiss_rect.top,
+        (float)m_dismiss_rect.Width(), (float)m_dismiss_rect.Height());
     _FillRoundedRect(g, rect, chip_radius,
-                     m_pressed_mode ? kColorAccent : kColorAccentSoft);
-    _DrawTextInRect(g, status.ascii_mode ? L"英" : L"中", m_font_fn.get(), rect,
-                    m_pressed_mode ? kColorWhite : kColorAccent);
+                     m_pressed_dismiss ? kColorKeyPressed : kColorKeyFn);
+    const float cx = rect.X + rect.Width / 2.0f;
+    const float cy = rect.Y + rect.Height / 2.0f;
+    const float s = 6.0f * dpi_scale;
+    Gdiplus::Pen pen(kColorSubText, 2.0f * dpi_scale);
+    pen.SetStartCap(Gdiplus::LineCapRound);
+    pen.SetEndCap(Gdiplus::LineCapRound);
+    pen.SetLineJoin(Gdiplus::LineJoinRound);
+    Gdiplus::GraphicsPath path;
+    path.AddLine(cx - s, cy - s * 0.35f, cx, cy + s * 0.45f);
+    path.AddLine(cx, cy + s * 0.45f, cx + s, cy - s * 0.35f);
+    g.DrawPath(&pen, &path);
+  }
+
+  // Toolbar strip: small icon buttons between the candidate strip and the
+  // letter rows (clipboard / edit / voice), like the phone keyboards.
+  {
+    const int band_top = m_grip_h + m_strip_h;
+    Gdiplus::SolidBrush band_brush(kColorStrip);
+    g.FillRectangle(&band_brush, Gdiplus::RectF(0.0f, (float)band_top, width,
+                                                (float)m_toolbar_h));
+    Gdiplus::SolidBrush line_brush(kColorLine);
+    g.FillRectangle(
+        &line_brush,
+        Gdiplus::RectF(0.0f, (float)(band_top + m_toolbar_h - 1), width, 1.0f));
+    for (const auto& entry : m_toolbar_rects) {
+      const int tool = entry.second;
+      const bool pressed = (tool == m_pressed_tool);
+      const Gdiplus::RectF rect((float)entry.first.left, (float)entry.first.top,
+                                (float)entry.first.Width(),
+                                (float)entry.first.Height());
+      _FillRoundedRect(g, rect, chip_radius,
+                       pressed ? kColorKeyPressed : kColorKeyFn);
+      const float cx = rect.X + rect.Width / 2.0f;
+      const float cy = rect.Y + rect.Height / 2.0f;
+      const float s = 7.0f * dpi_scale;
+      Gdiplus::Pen pen(pressed ? kColorAccent : kColorSubText,
+                       1.8f * dpi_scale);
+      pen.SetStartCap(Gdiplus::LineCapRound);
+      pen.SetEndCap(Gdiplus::LineCapRound);
+      pen.SetLineJoin(Gdiplus::LineJoinRound);
+      Gdiplus::GraphicsPath path;
+      switch (tool) {
+        case TOOL_CLIPBOARD: {  // clipboard outline with a clip on top
+          path.AddRectangle(Gdiplus::RectF(cx - s * 0.7f, cy - s * 0.4f,
+                                           s * 1.4f, s * 1.35f));
+          path.StartFigure();
+          path.AddLine(cx - s * 0.3f, cy - s * 0.85f, cx + s * 0.3f,
+                       cy - s * 0.85f);
+          path.AddLine(cx + s * 0.3f, cy - s * 0.85f, cx + s * 0.3f,
+                       cy - s * 0.45f);
+          path.AddLine(cx - s * 0.3f, cy - s * 0.45f, cx - s * 0.3f,
+                       cy - s * 0.85f);
+          break;
+        }
+        case TOOL_EDIT: {  // four-way arrow cluster
+          path.AddLine(cx, cy - s, cx + s * 0.9f, cy);
+          path.AddLine(cx + s * 0.9f, cy, cx, cy + s);
+          path.AddLine(cx, cy + s, cx - s * 0.9f, cy);
+          path.AddLine(cx - s * 0.9f, cy, cx, cy - s);
+          break;
+        }
+        case TOOL_VOICE: {  // microphone
+          path.AddArc(
+              Gdiplus::RectF(cx - s * 0.45f, cy - s, s * 0.9f, s * 0.9f),
+              180.0f, 180.0f);
+          path.AddLine(cx - s * 0.45f, cy - s * 0.55f, cx - s * 0.45f,
+                       cy - s * 0.35f);
+          path.AddLine(cx - s * 0.45f, cy - s * 0.35f, cx - s * 0.85f,
+                       cy - s * 0.1f);
+          path.AddLine(cx - s * 0.85f, cy + s * 0.75f, cx + s * 0.85f,
+                       cy + s * 0.75f);
+          path.AddLine(cx + s * 0.85f, cy - s * 0.1f, cx + s * 0.45f,
+                       cy - s * 0.35f);
+          path.AddLine(cx + s * 0.45f, cy - s * 0.35f, cx + s * 0.45f,
+                       cy - s * 0.55f);
+          break;
+        }
+        default:
+          break;
+      }
+      g.DrawPath(&pen, &path);
+    }
   }
 
   // Composition and candidates.
   m_candidate_rects.clear();
   {
-    float x = (float)(m_mode_rect.right + gap * 2);
+    float x = (float)(m_dismiss_rect.right + gap);
     const float area_right = width - (float)pad;
     const float chip_h = (float)_Scaled(34);
     const float chip_y = (float)strip_top + ((float)m_strip_h - chip_h) / 2.0f;
@@ -951,7 +1089,6 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
     const bool pressed = ((int)i == m_pressed_key);
     const bool voice_space = (def.action == KEY_SPACE && m_voice_active);
     const bool shift_on = (def.action == KEY_SHIFT && m_shift);
-    const bool select_on = (def.action == KEY_SELECT && m_select);
     const Gdiplus::RectF rect((float)key.rect.left, (float)key.rect.top,
                               (float)key.rect.Width(),
                               (float)key.rect.Height());
@@ -960,7 +1097,7 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
     if (voice_space) {
       bg = kColorAccent;
       fg = kColorWhite;
-    } else if (shift_on || select_on) {
+    } else if (shift_on) {
       bg = kColorAccentSoft;
       fg = kColorAccent;
     } else if (pressed) {
@@ -977,11 +1114,6 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
       g.DrawPath(&border_pen, &border_path);
     }
 
-    if (def.action == KEY_ARROW) {
-      _DrawChevron(g, key.rect, def.ibus_code,
-                   select_on ? kColorAccent : kColorText, dpi_scale);
-      continue;
-    }
     std::wstring label = def.label;
     if (def.action == KEY_TOGGLE_MODE)
       label = status.ascii_mode ? L"英" : L"中";
