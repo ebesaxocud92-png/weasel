@@ -1567,7 +1567,7 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
       _DrawTextInRect(
           g, def.text, m_font_candidate.get(),
           Gdiplus::RectF(rect.X + (float)_Scaled(16), rect.Y,
-                         rect.Width() - (float)_Scaled(24), rect.Height()),
+                         rect.Width - (float)_Scaled(24), rect.Height),
           fg, Gdiplus::StringAlignmentNear);
       continue;
     }
@@ -1583,7 +1583,7 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
       _DrawTextInRect(
           g, def.hint_left, m_font_tiny.get(),
           Gdiplus::RectF(rect.X + (float)_Scaled(6), rect.Y + (float)_Scaled(2),
-                         rect.Width() - (float)_Scaled(12), (float)_Scaled(16)),
+                         rect.Width - (float)_Scaled(12), (float)_Scaled(16)),
           kColorSubText, Gdiplus::StringAlignmentNear,
           Gdiplus::StringAlignmentNear);
     }
@@ -1591,7 +1591,7 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
       _DrawTextInRect(
           g, def.hint_right, m_font_tiny.get(),
           Gdiplus::RectF(rect.X + (float)_Scaled(6), rect.Y + (float)_Scaled(2),
-                         rect.Width() - (float)_Scaled(12), (float)_Scaled(16)),
+                         rect.Width - (float)_Scaled(12), (float)_Scaled(16)),
           kColorSubText, Gdiplus::StringAlignmentFar,
           Gdiplus::StringAlignmentNear);
     }
