@@ -4,106 +4,19 @@
 #include <ShellScalingApi.h>
 #include <WeaselUtility.h>
 
-#include <algorithm>
 #include <cmath>
 
 #pragma comment(lib, "Shcore.lib")
 #pragma comment(lib, "gdiplus.lib")
 
-// Key table ----------------------------------------------------------------
-
-enum KeyAction {
-  KEY_NORMAL = 0,
-  KEY_SHIFT,
-  KEY_BACKSPACE,
-  KEY_ENTER,
-  KEY_TOGGLE_MODE,
-  KEY_SPACE,
-};
-
-struct KeyDef {
-  const wchar_t* label;
-  UINT ibus_code;
-  UINT vk;
-  int action;
-  float weight;
-  bool is_fn;
-};
-
 namespace {
-
-const KeyDef kRow1[] = {
-    {L"q", 'q', 'Q', KEY_NORMAL, 1.0f, false},
-    {L"w", 'w', 'W', KEY_NORMAL, 1.0f, false},
-    {L"e", 'e', 'E', KEY_NORMAL, 1.0f, false},
-    {L"r", 'r', 'R', KEY_NORMAL, 1.0f, false},
-    {L"t", 't', 'T', KEY_NORMAL, 1.0f, false},
-    {L"y", 'y', 'Y', KEY_NORMAL, 1.0f, false},
-    {L"u", 'u', 'U', KEY_NORMAL, 1.0f, false},
-    {L"i", 'i', 'I', KEY_NORMAL, 1.0f, false},
-    {L"o", 'o', 'O', KEY_NORMAL, 1.0f, false},
-    {L"p", 'p', 'P', KEY_NORMAL, 1.0f, false},
-};
-
-const KeyDef kRow2[] = {
-    {L"a", 'a', 'A', KEY_NORMAL, 1.0f, false},
-    {L"s", 's', 'S', KEY_NORMAL, 1.0f, false},
-    {L"d", 'd', 'D', KEY_NORMAL, 1.0f, false},
-    {L"f", 'f', 'F', KEY_NORMAL, 1.0f, false},
-    {L"g", 'g', 'G', KEY_NORMAL, 1.0f, false},
-    {L"h", 'h', 'H', KEY_NORMAL, 1.0f, false},
-    {L"j", 'j', 'J', KEY_NORMAL, 1.0f, false},
-    {L"k", 'k', 'K', KEY_NORMAL, 1.0f, false},
-    {L"l", 'l', 'L', KEY_NORMAL, 1.0f, false},
-};
-
-const KeyDef kRow3[] = {
-    {L"Shift", 0, 0, KEY_SHIFT, 1.5f, true},
-    {L"z", 'z', 'Z', KEY_NORMAL, 1.0f, false},
-    {L"x", 'x', 'X', KEY_NORMAL, 1.0f, false},
-    {L"c", 'c', 'C', KEY_NORMAL, 1.0f, false},
-    {L"v", 'v', 'V', KEY_NORMAL, 1.0f, false},
-    {L"b", 'b', 'B', KEY_NORMAL, 1.0f, false},
-    {L"n", 'n', 'N', KEY_NORMAL, 1.0f, false},
-    {L"m", 'm', 'M', KEY_NORMAL, 1.0f, false},
-    {L"Del", 0, VK_BACK, KEY_BACKSPACE, 1.5f, true},
-};
-
-// The main key face follows the phone keyboard convention: three letter rows
-// and a bottom function row. Edit/clipboard tools live in the toolbar above.
-const KeyDef kRow4[] = {
-    {L"中", 0, 0, KEY_TOGGLE_MODE, 1.1f, true},
-    {L"，", 0x2C, VK_OEM_COMMA, KEY_NORMAL, 1.0f, true},
-    {L"按住说话", 0x20, VK_SPACE, KEY_SPACE, 5.0f, false},
-    {L"。", 0x2E, VK_OEM_PERIOD, KEY_NORMAL, 1.0f, true},
-    {L"换行", 0, VK_RETURN, KEY_ENTER, 1.1f, true},
-};
-
-struct RowDef {
-  const KeyDef* defs;
-  int count;
-};
-
-const RowDef kRows[] = {
-    {kRow1, ARRAYSIZE(kRow1)},
-    {kRow2, ARRAYSIZE(kRow2)},
-    {kRow3, ARRAYSIZE(kRow3)},
-    {kRow4, ARRAYSIZE(kRow4)},
-};
-
-const KeyDef& _DefById(int id) {
-  const int row = (id >> 8) & 0xff;
-  const int index = id & 0xff;
-  return kRows[row].defs[index];
-}
-
-// Palette -------------------------------------------------------------------
 
 const Gdiplus::Color kColorBg(255, 240, 242, 247);
 const Gdiplus::Color kColorStrip(255, 255, 255, 255);
 const Gdiplus::Color kColorLine(255, 228, 231, 238);
+const Gdiplus::Color kColorCard(255, 255, 255, 255);
 const Gdiplus::Color kColorKey(255, 255, 255, 255);
-const Gdiplus::Color kColorKeyBorder(30, 0, 0, 0);
+const Gdiplus::Color kColorKeyBorder(40, 0, 0, 0);
 const Gdiplus::Color kColorKeyFn(255, 227, 230, 237);
 const Gdiplus::Color kColorKeyPressed(255, 205, 210, 220);
 const Gdiplus::Color kColorText(255, 26, 26, 26);
@@ -112,6 +25,35 @@ const Gdiplus::Color kColorGrip(64, 0, 0, 0);
 const Gdiplus::Color kColorAccent(255, 52, 120, 246);
 const Gdiplus::Color kColorAccentSoft(255, 230, 239, 255);
 const Gdiplus::Color kColorWhite(255, 255, 255, 255);
+
+const wchar_t kFontFace[] = L"Microsoft YaHei UI";
+
+// Keyboard height (logical 96 dpi units), persisted across restarts.
+constexpr int kDefaultHeight96 = 360;
+constexpr int kMinHeight96 = 310;
+constexpr int kMaxHeight96 = 620;
+const wchar_t kRegPath[] = L"Software\\Rime\\Weasel";
+const wchar_t kRegValueHeight[] = L"SoftKeyboardHeight";
+
+constexpr size_t kMaxClipItems = 100;
+constexpr size_t kMaxClipLength = 200;
+
+int _LoadHeight() {
+  DWORD value = 0;
+  DWORD size = sizeof(value);
+  if (RegGetValueW(HKEY_CURRENT_USER, kRegPath, kRegValueHeight,
+                   RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS) {
+    if (value >= (DWORD)kMinHeight96 && value <= (DWORD)kMaxHeight96)
+      return (int)value;
+  }
+  return kDefaultHeight96;
+}
+
+void _SaveHeight(int height) {
+  DWORD value = (DWORD)height;
+  RegSetKeyValueW(HKEY_CURRENT_USER, kRegPath, kRegValueHeight, REG_DWORD,
+                  &value, sizeof(value));
+}
 
 // Drawing helpers -----------------------------------------------------------
 
@@ -147,12 +89,13 @@ void _DrawTextInRect(
     Gdiplus::Font* font,
     const Gdiplus::RectF& rect,
     const Gdiplus::Color& color,
-    Gdiplus::StringAlignment align = Gdiplus::StringAlignmentCenter) {
+    Gdiplus::StringAlignment align = Gdiplus::StringAlignmentCenter,
+    Gdiplus::StringAlignment valign = Gdiplus::StringAlignmentCenter) {
   if (text.empty() || !font)
     return;
   Gdiplus::StringFormat format;
   format.SetAlignment(align);
-  format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  format.SetLineAlignment(valign);
   format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
   format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
   Gdiplus::SolidBrush brush(color);
@@ -172,31 +115,263 @@ float _MeasureText(Gdiplus::Graphics& g,
   return bounds.Width;
 }
 
-const wchar_t kFontFace[] = L"Microsoft YaHei UI";
-
-// Keyboard height (logical 96 dpi units), persisted across restarts.
-constexpr int kDefaultHeight96 = 340;
-constexpr int kMinHeight96 = 250;
-constexpr int kMaxHeight96 = 620;
-const wchar_t kRegPath[] = L"Software\\Rime\\Weasel";
-const wchar_t kRegValueHeight[] = L"SoftKeyboardHeight";
-
-int _LoadHeight() {
-  DWORD value = 0;
-  DWORD size = sizeof(value);
-  if (RegGetValueW(HKEY_CURRENT_USER, kRegPath, kRegValueHeight,
-                   RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS) {
-    if (value >= (DWORD)kMinHeight96 && value <= (DWORD)kMaxHeight96)
-      return (int)value;
+void _DrawChevron(Gdiplus::Graphics& g,
+                  const CRect& rc,
+                  UINT ibus_code,
+                  const Gdiplus::Color& color,
+                  float scale) {
+  const float cx = ((float)rc.left + (float)rc.right) / 2.0f;
+  const float cy = ((float)rc.top + (float)rc.bottom) / 2.0f;
+  const float s = 7.0f * scale;
+  Gdiplus::Pen pen(color, 2.2f * scale);
+  pen.SetStartCap(Gdiplus::LineCapRound);
+  pen.SetEndCap(Gdiplus::LineCapRound);
+  pen.SetLineJoin(Gdiplus::LineJoinRound);
+  Gdiplus::GraphicsPath path;
+  switch (ibus_code) {
+    case ibus::Left:
+      path.AddLine(cx + s * 0.5f, cy - s, cx - s * 0.5f, cy);
+      path.AddLine(cx - s * 0.5f, cy, cx + s * 0.5f, cy + s);
+      break;
+    case ibus::Right:
+      path.AddLine(cx - s * 0.5f, cy - s, cx + s * 0.5f, cy);
+      path.AddLine(cx + s * 0.5f, cy, cx - s * 0.5f, cy + s);
+      break;
+    case ibus::Up:
+      path.AddLine(cx - s, cy + s * 0.5f, cx, cy - s * 0.5f);
+      path.AddLine(cx, cy - s * 0.5f, cx + s, cy + s * 0.5f);
+      break;
+    case ibus::Down:
+      path.AddLine(cx - s, cy - s * 0.5f, cx, cy + s * 0.5f);
+      path.AddLine(cx, cy + s * 0.5f, cx + s, cy - s * 0.5f);
+      break;
+    default:
+      return;
   }
-  return kDefaultHeight96;
+  g.DrawPath(&pen, &path);
 }
 
-void _SaveHeight(int height) {
-  DWORD value = (DWORD)height;
-  RegSetKeyValueW(HKEY_CURRENT_USER, kRegPath, kRegValueHeight, REG_DWORD,
-                  &value, sizeof(value));
+void _DrawBackspaceIcon(Gdiplus::Graphics& g,
+                        float cx,
+                        float cy,
+                        float s,
+                        const Gdiplus::Color& color) {
+  Gdiplus::Pen pen(color, s * 0.22f);
+  pen.SetStartCap(Gdiplus::LineCapRound);
+  pen.SetEndCap(Gdiplus::LineCapRound);
+  pen.SetLineJoin(Gdiplus::LineJoinRound);
+  const float x0 = cx - 0.95f * s;
+  const float x1 = cx - 0.15f * s;
+  const float x2 = cx + 0.95f * s;
+  const float y0 = cy - 0.72f * s;
+  const float y1 = cy + 0.72f * s;
+  Gdiplus::GraphicsPath path;
+  path.AddLine(x1, y0, x2, y0);
+  path.AddLine(x2, y0, x2, y1);
+  path.AddLine(x2, y1, x1, y1);
+  path.AddLine(x1, y1, x0, cy);
+  path.CloseFigure();
+  g.DrawPath(&pen, &path);
+  g.DrawLine(&pen, cx + 0.12f * s, cy - 0.28f * s, cx + 0.6f * s,
+             cy + 0.28f * s);
+  g.DrawLine(&pen, cx + 0.6f * s, cy - 0.28f * s, cx + 0.12f * s,
+             cy + 0.28f * s);
 }
+
+void _DrawScissorsIcon(Gdiplus::Graphics& g,
+                       float cx,
+                       float cy,
+                       float s,
+                       const Gdiplus::Color& color) {
+  Gdiplus::Pen pen(color, s * 0.2f);
+  pen.SetStartCap(Gdiplus::LineCapRound);
+  pen.SetEndCap(Gdiplus::LineCapRound);
+  g.DrawEllipse(&pen, cx - 0.95f * s, cy - 1.0f * s, 0.52f * s, 0.52f * s);
+  g.DrawEllipse(&pen, cx - 0.95f * s, cy + 0.48f * s, 0.52f * s, 0.52f * s);
+  g.DrawLine(&pen, cx - 0.5f * s, cy - 0.55f * s, cx + 0.95f * s,
+             cy + 0.8f * s);
+  g.DrawLine(&pen, cx - 0.5f * s, cy + 0.55f * s, cx + 0.95f * s,
+             cy - 0.8f * s);
+}
+
+void _DrawEditIcon(Gdiplus::Graphics& g,
+                   float cx,
+                   float cy,
+                   float s,
+                   const Gdiplus::Color& color) {
+  Gdiplus::Pen pen(color, s * 0.18f);
+  pen.SetStartCap(Gdiplus::LineCapRound);
+  pen.SetEndCap(Gdiplus::LineCapRound);
+  pen.SetLineJoin(Gdiplus::LineJoinRound);
+  g.DrawLine(&pen, cx, cy - 0.72f * s, cx, cy + 0.72f * s);
+  g.DrawLine(&pen, cx - 0.26f * s, cy - 0.72f * s, cx + 0.26f * s,
+             cy - 0.72f * s);
+  g.DrawLine(&pen, cx - 0.26f * s, cy + 0.72f * s, cx + 0.26f * s,
+             cy + 0.72f * s);
+  g.DrawLine(&pen, cx - 0.62f * s, cy - 0.44f * s, cx - 0.92f * s, cy);
+  g.DrawLine(&pen, cx - 0.92f * s, cy, cx - 0.62f * s, cy + 0.44f * s);
+  g.DrawLine(&pen, cx + 0.62f * s, cy - 0.44f * s, cx + 0.92f * s, cy);
+  g.DrawLine(&pen, cx + 0.92f * s, cy, cx + 0.62f * s, cy + 0.44f * s);
+}
+
+void _DrawChevronDown(Gdiplus::Graphics& g,
+                      float cx,
+                      float cy,
+                      float s,
+                      const Gdiplus::Color& color) {
+  Gdiplus::Pen pen(color, s * 0.2f);
+  pen.SetStartCap(Gdiplus::LineCapRound);
+  pen.SetEndCap(Gdiplus::LineCapRound);
+  g.DrawLine(&pen, cx - 0.7f * s, cy - 0.35f * s, cx, cy + 0.35f * s);
+  g.DrawLine(&pen, cx, cy + 0.35f * s, cx + 0.7f * s, cy - 0.35f * s);
+}
+
+// Key definitions -----------------------------------------------------------
+
+KeyDef K(const wchar_t* label,
+         UINT code,
+         UINT vk,
+         int action,
+         float weight = 1.0f,
+         bool is_fn = false,
+         const wchar_t* hint_left = nullptr,
+         const wchar_t* hint_right = nullptr,
+         bool is_primary = false,
+         int payload = 0) {
+  KeyDef def;
+  def.label = label;
+  def.ibus_code = code;
+  def.vk = vk;
+  def.action = action;
+  def.weight = weight;
+  def.is_fn = is_fn;
+  def.hint_left = hint_left;
+  def.hint_right = hint_right;
+  def.is_primary = is_primary;
+  def.payload = payload;
+  return def;
+}
+
+// A symbol key: no engine involvement, typed directly as unicode text.
+KeyDef KS(const wchar_t* symbol) {
+  KeyDef def = K(symbol, 0, 0, KEY_NORMAL);
+  def.text = symbol;
+  return def;
+}
+
+const KeyDef kLettersR1[10] = {
+    K(L"q", 'q', 'Q', KEY_NORMAL, 1, false, L"1"),
+    K(L"w", 'w', 'W', KEY_NORMAL, 1, false, L"2"),
+    K(L"e", 'e', 'E', KEY_NORMAL, 1, false, L"3"),
+    K(L"r", 'r', 'R', KEY_NORMAL, 1, false, L"4"),
+    K(L"t", 't', 'T', KEY_NORMAL, 1, false, L"5"),
+    K(L"y", 'y', 'Y', KEY_NORMAL, 1, false, L"6"),
+    K(L"u", 'u', 'U', KEY_NORMAL, 1, false, L"7"),
+    K(L"i", 'i', 'I', KEY_NORMAL, 1, false, L"8"),
+    K(L"o", 'o', 'O', KEY_NORMAL, 1, false, L"9"),
+    K(L"p", 'p', 'P', KEY_NORMAL, 1, false, L"0"),
+};
+
+const KeyDef kLettersR2[9] = {
+    K(L"a", 'a', 'A', KEY_NORMAL, 1, false, nullptr, L"~"),
+    K(L"s", 's', 'S', KEY_NORMAL, 1, false, nullptr, L"!"),
+    K(L"d", 'd', 'D', KEY_NORMAL, 1, false, nullptr, L"@"),
+    K(L"f", 'f', 'F', KEY_NORMAL, 1, false, nullptr, L"/"),
+    K(L"g", 'g', 'G', KEY_NORMAL, 1, false, nullptr, L"%"),
+    K(L"h", 'h', 'H', KEY_NORMAL, 1, false, nullptr, L"\""),
+    K(L"j", 'j', 'J', KEY_NORMAL, 1, false, nullptr, L"\""),
+    K(L"k", 'k', 'K', KEY_NORMAL, 1, false, nullptr, L"*"),
+    K(L"l", 'l', 'L', KEY_NORMAL, 1, false, nullptr, L"?"),
+};
+
+const KeyDef kLettersR3[9] = {
+    K(L"ab", 0, 0, KEY_SHIFT, 1.5f, true),
+    K(L"z", 'z', 'Z', KEY_NORMAL, 1, false, nullptr, L"("),
+    K(L"x", 'x', 'X', KEY_NORMAL, 1, false, nullptr, L")"),
+    K(L"c", 'c', 'C', KEY_NORMAL, 1, false, nullptr, L"-"),
+    K(L"v", 'v', 'V', KEY_NORMAL, 1, false, nullptr, L"_"),
+    K(L"b", 'b', 'B', KEY_NORMAL, 1, false, nullptr, L":"),
+    K(L"n", 'n', 'N', KEY_NORMAL, 1, false, nullptr, L";"),
+    K(L"m", 'm', 'M', KEY_NORMAL, 1, false, nullptr, L"/"),
+    K(L"", 0, VK_BACK, KEY_BACKSPACE, 1.5f, true),
+};
+
+const KeyDef kLettersR4[7] = {
+    K(L"符",
+      0,
+      0,
+      KEY_PAGE,
+      1.0f,
+      true,
+      nullptr,
+      nullptr,
+      false,
+      WeaselKeyboard::PAGE_SYMBOLS),
+    K(L"123",
+      0,
+      0,
+      KEY_PAGE,
+      1.3f,
+      true,
+      nullptr,
+      nullptr,
+      false,
+      WeaselKeyboard::PAGE_NUMBERS),
+    K(L"，", 0x2C, VK_OEM_COMMA, KEY_NORMAL, 0.9f, false),
+    K(L"按住说话", 0x20, VK_SPACE, KEY_SPACE, 4.2f, false),
+    K(L"。", 0x2E, VK_OEM_PERIOD, KEY_NORMAL, 0.9f, false),
+    K(L"中/英", 0, 0, KEY_MODE, 1.3f, true),
+    K(L"前往", 0, VK_RETURN, KEY_ENTER, 1.5f, true),
+};
+
+const KeyDef kEditR1[5] = {
+    K(L"Tab", 0, 0, KEY_TAB, 1, true),
+    K(L"复制", 0, 0, KEY_COPY, 1, true),
+    K(L"", ibus::Up, VK_UP, KEY_ARROW, 1, true),
+    K(L"粘贴", 0, 0, KEY_PASTE, 1, true),
+    K(L"", 0, VK_BACK, KEY_BACKSPACE, 1, true),
+};
+
+const KeyDef kEditR2[5] = {
+    K(L"开头", 0, 0, KEY_HOME, 1, true),
+    K(L"", ibus::Left, VK_LEFT, KEY_ARROW, 1, true),
+    K(L"选择", 0, 0, KEY_SELECT, 1, true),
+    K(L"", ibus::Right, VK_RIGHT, KEY_ARROW, 1, true),
+    K(L"Del", 0, 0, KEY_DELETE, 1, true),
+};
+
+const KeyDef kEditR3[5] = {
+    K(L"末尾", 0, 0, KEY_END, 1, true),
+    K(L"全选", 0, 0, KEY_SELECT_ALL, 1, true),
+    K(L"", ibus::Down, VK_DOWN, KEY_ARROW, 1, true),
+    K(L"剪切", 0, 0, KEY_CUT, 1, true),
+    K(L"返回",
+      0,
+      0,
+      KEY_PAGE,
+      1,
+      false,
+      nullptr,
+      nullptr,
+      true,
+      WeaselKeyboard::PAGE_LETTERS),
+};
+
+const wchar_t* const kSymbolCatNames[5] = {L"常用", L"中文", L"英文", L"数学",
+                                           L"特殊"};
+
+const wchar_t* const kSymbolTable[5][18] = {
+    {L"，", L"。", L"？", L"！", L"：", L"；", L"、", L"／", L"（", L"）",
+     L"＠", L"％", L"＋", L"《", L"》", L"－", L"＊", L"＃"},
+    {L"，", L"。", L"、", L"；", L"：", L"？", L"！", L"“", L"”", L"‘", L"’",
+     L"（", L"）", L"《", L"》", L"【", L"】", L"……"},
+    {L"~", L"!", L"@", L"#", L"$", L"%", L"^", L"&", L"*", L"(", L")", L"-",
+     L"_", L"=", L"+", L"[", L"]", L"\\"},
+    {L"+", L"−", L"×", L"÷", L"=", L"≠", L"≈", L"≤", L"≥", L"±", L"∝", L"∞",
+     L"√", L"∑", L"∫", L"π", L"°", L"‰"},
+    {L"★", L"☆", L"♥", L"♦", L"♣", L"♠", L"→", L"←", L"↑", L"↓", L"￥", L"$",
+     L"€", L"£", L"℃", L"℉", L"※", L"§"},
+};
 
 }  // namespace
 
@@ -210,6 +385,7 @@ WeaselKeyboard::~WeaselKeyboard() {
   if (IsWindow()) {
     KillTimer(TIMER_LONGPRESS);
     KillTimer(TIMER_HINT);
+    KillTimer(TIMER_CLIPBOARD);
   }
   _ReleaseBackBuffer();
   m_font_key.reset();
@@ -217,6 +393,7 @@ WeaselKeyboard::~WeaselKeyboard() {
   m_font_candidate.reset();
   m_font_preedit.reset();
   m_font_hint.reset();
+  m_font_tiny.reset();
   m_font_family.reset();
   if (m_gdiplus_token) {
     Gdiplus::GdiplusShutdown(m_gdiplus_token);
@@ -238,7 +415,11 @@ bool WeaselKeyboard::Create(HWND parent) {
 void WeaselKeyboard::Show() {
   if (!IsWindow())
     return;
+  m_page = PAGE_LETTERS;
+  m_shift = false;
+  m_select = false;
   Reposition();
+  _Layout();
   _Render();
   ShowWindow(SW_SHOWNA);
 }
@@ -316,12 +497,14 @@ LRESULT WeaselKeyboard::OnCreate(UINT, WPARAM, LPARAM, BOOL&) {
   // Touch-aware: Windows skips press-and-hold-to-right-click gesture
   // recognition on this window; touch arrives as WM_TOUCH.
   ::RegisterTouchWindow(m_hWnd, 0);
+  SetTimer(TIMER_CLIPBOARD, 500);
   return 0;
 }
 
 LRESULT WeaselKeyboard::OnDestroy(UINT, WPARAM, LPARAM, BOOL&) {
   KillTimer(TIMER_LONGPRESS);
   KillTimer(TIMER_HINT);
+  KillTimer(TIMER_CLIPBOARD);
   m_longpress_timer = 0;
   m_hint_timer = 0;
   ::UnregisterTouchWindow(m_hWnd);
@@ -383,7 +566,7 @@ LRESULT WeaselKeyboard::OnTimer(UINT, WPARAM wParam, LPARAM, BOOL&) {
     KillTimer(TIMER_LONGPRESS);
     m_longpress_timer = 0;
     if (m_pressed_key >= 0 && m_pressed_key < (int)m_keys.size() &&
-        _DefById(m_keys[m_pressed_key].id).action == KEY_SPACE &&
+        m_defs[m_keys[m_pressed_key].def].action == KEY_SPACE &&
         !m_voice_active) {
       m_voice_active = true;
       _Render();
@@ -396,6 +579,8 @@ LRESULT WeaselKeyboard::OnTimer(UINT, WPARAM wParam, LPARAM, BOOL&) {
       m_hint.clear();
     }
     _Render();
+  } else if (wParam == TIMER_CLIPBOARD) {
+    _PollClipboard();
   }
   return 0;
 }
@@ -448,6 +633,18 @@ LRESULT WeaselKeyboard::OnTouch(UINT, WPARAM wParam, LPARAM lParam, BOOL&) {
   return 0;
 }
 
+LRESULT WeaselKeyboard::OnSetCursor(UINT, WPARAM, LPARAM, BOOL&) {
+  CPoint pt;
+  ::GetCursorPos(&pt);
+  ::ScreenToClient(m_hWnd, &pt);
+  if (m_resizing || m_grip_rect.PtInRect(pt)) {
+    ::SetCursor(::LoadCursor(NULL, IDC_SIZENS));
+  } else {
+    ::SetCursor(::LoadCursor(NULL, IDC_ARROW));
+  }
+  return TRUE;
+}
+
 void WeaselKeyboard::_PointerDown(CPoint pt) {
   if (m_grip_rect.PtInRect(pt)) {
     m_resizing = true;
@@ -457,19 +654,11 @@ void WeaselKeyboard::_PointerDown(CPoint pt) {
     return;
   }
   SetCapture();
-  m_pressed_dismiss = (m_dismiss_rect.PtInRect(pt) != FALSE);
-  if (m_pressed_dismiss)
-    return;
-  m_pressed_tool = _ToolAt(pt);
-  if (m_pressed_tool >= 0) {
-    _Render();
-    return;
-  }
   m_pressed_candidate = _CandidateAt(pt);
   if (m_pressed_candidate < 0) {
     m_pressed_key = _KeyAt(pt);
     if (m_pressed_key >= 0 &&
-        _DefById(m_keys[m_pressed_key].id).action == KEY_SPACE) {
+        m_defs[m_keys[m_pressed_key].def].action == KEY_SPACE) {
       m_longpress_timer = SetTimer(TIMER_LONGPRESS, 350);
     }
   }
@@ -489,34 +678,9 @@ void WeaselKeyboard::_PointerUp(CPoint pt) {
     KillTimer(TIMER_LONGPRESS);
     m_longpress_timer = 0;
   }
-  if (m_pressed_dismiss) {
-    if (m_dismiss_rect.PtInRect(pt)) {
-      if (m_dismiss_handler)
-        m_dismiss_handler();
-      else
-        Hide();
-    }
-    m_pressed_dismiss = false;
-    _Render();
-    return;
-  }
-  if (m_pressed_tool >= 0) {
-    if (_ToolAt(pt) == m_pressed_tool && m_tool_handler) {
-      m_tool_handler(m_pressed_tool);
-    }
-    m_pressed_tool = -1;
-    _Render();
-    return;
-  }
   if (m_voice_active) {
     m_voice_active = false;
-    {
-      std::lock_guard<std::mutex> lock(m_data_mutex);
-      m_hint = L"语音输入开发中，即将上线";
-    }
-    if (m_hint_timer)
-      KillTimer(TIMER_HINT);
-    m_hint_timer = SetTimer(TIMER_HINT, 1600);
+    ShowHint(L"语音输入开发中，即将上线");
   } else if (m_pressed_candidate >= 0) {
     const int candidate = _CandidateAt(pt);
     if (candidate == m_pressed_candidate && m_select_handler) {
@@ -550,18 +714,6 @@ void WeaselKeyboard::_PointerMove() {
   }
 }
 
-LRESULT WeaselKeyboard::OnSetCursor(UINT, WPARAM, LPARAM, BOOL&) {
-  CPoint pt;
-  ::GetCursorPos(&pt);
-  ::ScreenToClient(m_hWnd, &pt);
-  if (m_resizing || m_grip_rect.PtInRect(pt)) {
-    ::SetCursor(::LoadCursor(NULL, IDC_SIZENS));
-  } else {
-    ::SetCursor(::LoadCursor(NULL, IDC_ARROW));
-  }
-  return TRUE;
-}
-
 int WeaselKeyboard::_Scaled(int value) const {
   return (int)std::lround(value * m_dpi / 96.0);
 }
@@ -582,6 +734,7 @@ void WeaselKeyboard::_UpdateFonts() {
   m_font_candidate.reset();
   m_font_preedit.reset();
   m_font_hint.reset();
+  m_font_tiny.reset();
   m_font_family.reset();
   m_font_family = std::make_unique<Gdiplus::FontFamily>(kFontFace);
   if (!m_font_family->IsAvailable()) {
@@ -606,69 +759,209 @@ void WeaselKeyboard::_UpdateFonts() {
   m_font_hint = std::make_unique<Gdiplus::Font>(
       m_font_family.get(), 13.0f * base, Gdiplus::FontStyleRegular,
       Gdiplus::UnitPixel);
+  m_font_tiny = std::make_unique<Gdiplus::Font>(
+      m_font_family.get(), 11.0f * base, Gdiplus::FontStyleRegular,
+      Gdiplus::UnitPixel);
 }
 
 void WeaselKeyboard::_Layout() {
   CRect rc;
   GetClientRect(&rc);
   m_keys.clear();
-  m_toolbar_rects.clear();
+  m_defs.clear();
+  m_defs.reserve(512);
   m_grip_h = _Scaled(14);
   m_strip_h = _Scaled(48);
-  m_toolbar_h = _Scaled(40);
+  m_toolbar_h = _Scaled(44);
   m_grip_rect = CRect(rc.left, rc.top, rc.right, rc.top + m_grip_h);
-  const int pad = _Scaled(8);
-  const int gap = _Scaled(8);
-  // Dismiss key sits at the left edge of the candidate strip, like the
-  // phone keyboards put it.
-  const int dismiss_w = _Scaled(40);
-  m_dismiss_rect = CRect(pad, m_grip_h + _Scaled(6), pad + dismiss_w,
-                         m_grip_h + m_strip_h - _Scaled(6));
   if (rc.Width() <= 0 || rc.Height() <= 0)
     return;
-  // Toolbar: three small icon buttons, left-aligned.
-  const int tool_w = _Scaled(64);
-  const int tool_h = _Scaled(30);
-  const int tool_y = m_grip_h + m_strip_h + (m_toolbar_h - tool_h) / 2;
-  int tool_x = pad;
-  for (int t = 0; t < 3; ++t) {
-    m_toolbar_rects.emplace_back(
-        CRect(tool_x, tool_y, tool_x + tool_w, tool_y + tool_h), t);
-    tool_x += tool_w + gap;
-  }
-  const int top = m_grip_h + m_strip_h + m_toolbar_h;
-  const int row_count = (int)ARRAYSIZE(kRows);
-  const int total_gap = gap * (row_count - 1);
-  int row_h = (rc.Height() - top - pad * 2 - total_gap) / row_count;
-  if (row_h < _Scaled(30))
-    row_h = _Scaled(30);
-  int y = top + pad;
-  for (int r = 0; r < row_count; ++r) {
-    const RowDef& row = kRows[r];
-    float weight_sum = 0.0f;
-    for (int i = 0; i < row.count; ++i)
-      weight_sum += row.defs[i].weight;
-    // Stagger the letter rows like a phone keyboard.
-    int inset = 0;
-    if (r == 1)
-      inset = rc.Width() / 28;
-    else if (r == 2)
-      inset = rc.Width() / 14;
-    const int avail = rc.Width() - (pad + inset) * 2 - gap * (row.count - 1);
+  const int pad = _Scaled(6);
+  const int gap = _Scaled(7);
+  auto put = [&](int x, int y, int w, int h, const KeyDef& def) {
+    if (w < 1 || h < 1)
+      return;
+    m_defs.push_back(def);
+    KeyLayout kl;
+    kl.rect = CRect(x, y, x + w, y + h);
+    kl.def = (int)(m_defs.size() - 1);
+    m_keys.push_back(kl);
+  };
+  auto row = [&](const KeyDef* defs, int n, int x0, int w_total, int y, int h) {
+    float sum = 0.0f;
+    for (int i = 0; i < n; ++i)
+      sum += defs[i].weight;
+    const int avail = w_total - gap * (n - 1);
     if (avail <= 0)
       return;
-    int x = pad + inset;
-    for (int i = 0; i < row.count; ++i) {
-      int w = (i == row.count - 1)
-                  ? (rc.Width() - pad - inset - x)
-                  : (int)(avail * (row.defs[i].weight / weight_sum) + 0.5f);
-      KeyLayout key;
-      key.rect = CRect(x, y, x + w, y + row_h);
-      key.id = (r << 8) | i;
-      m_keys.push_back(key);
-      x += w + gap;
+    int x = x0;
+    for (int i = 0; i < n; ++i) {
+      int kw = (i == n - 1) ? (x0 + w_total - x)
+                            : (int)(avail * (defs[i].weight / sum) + 0.5f);
+      put(x, y, kw, h, defs[i]);
+      x += kw + gap;
     }
-    y += row_h + gap;
+  };
+
+  // Toolbar row: clipboard / edit chips on the left, dismiss on the right.
+  const int toolbar_top = m_grip_h + m_strip_h;
+  {
+    const int bh = m_toolbar_h - _Scaled(10);
+    const int by = toolbar_top + _Scaled(5);
+    const int bw = _Scaled(84);
+    put(pad, by, bw, bh, K(L"", 0, 0, KEY_TOOL_CLIPBOARD));
+    put(pad + bw + gap, by, bw, bh, K(L"", 0, 0, KEY_TOOL_EDIT));
+    const int dw = _Scaled(56);
+    put(rc.right - pad - dw, by, dw, bh, K(L"", 0, 0, KEY_DISMISS, 1, true));
+  }
+
+  const int top = toolbar_top + m_toolbar_h;
+  const int full_w = rc.Width() - pad * 2;
+
+  switch (m_page) {
+    case PAGE_LETTERS: {
+      int rh = (rc.Height() - top - pad * 2 - gap * 3) / 4;
+      if (rh < _Scaled(32))
+        rh = _Scaled(32);
+      int y = top + pad;
+      row(kLettersR1, 10, pad, full_w, y, rh);
+      y += rh + gap;
+      {
+        const int inset = rc.Width() / 28;
+        row(kLettersR2, 9, pad + inset, full_w - inset * 2, y, rh);
+      }
+      y += rh + gap;
+      {
+        const int inset = rc.Width() / 14;
+        row(kLettersR3, 9, pad + inset, full_w - inset * 2, y, rh);
+      }
+      y += rh + gap;
+      row(kLettersR4, 7, pad, full_w, y, rh);
+      break;
+    }
+    case PAGE_NUMBERS: {
+      int rh = (rc.Height() - top - pad * 2 - gap * 3) / 4;
+      if (rh < _Scaled(32))
+        rh = _Scaled(32);
+      const int cw = (full_w - gap * 4) / 5;
+      int cx[5];
+      {
+        int x = pad;
+        for (int c = 0; c < 5; ++c) {
+          cx[c] = x;
+          x += cw + gap;
+        }
+      }
+      const int y1 = top + pad;
+      const int y2 = y1 + rh + gap;
+      const int y3 = y2 + rh + gap;
+      const int y4 = y3 + rh + gap;
+      put(cx[0], y1, cw, rh, KS(L"%"));
+      put(cx[1], y1, cw, rh, K(L"1", '1', '1', KEY_NORMAL));
+      put(cx[2], y1, cw, rh, K(L"2", '2', '2', KEY_NORMAL));
+      put(cx[3], y1, cw, rh, K(L"3", '3', '3', KEY_NORMAL));
+      put(cx[4], y1, cw, rh, K(L"", 0, VK_BACK, KEY_BACKSPACE, 1, true));
+      put(cx[0], y2, cw, rh, KS(L"+"));
+      put(cx[1], y2, cw, rh, K(L"4", '4', '4', KEY_NORMAL));
+      put(cx[2], y2, cw, rh, K(L"5", '5', '5', KEY_NORMAL));
+      put(cx[3], y2, cw, rh, K(L"6", '6', '6', KEY_NORMAL));
+      put(cx[4], y2, cw, rh * 2 + gap, K(L"空格", 0x20, VK_SPACE, KEY_SPACE));
+      put(cx[0], y3, cw, rh, KS(L"−"));
+      put(cx[1], y3, cw, rh, K(L"7", '7', '7', KEY_NORMAL));
+      put(cx[2], y3, cw, rh, K(L"8", '8', '8', KEY_NORMAL));
+      put(cx[3], y3, cw, rh, K(L"9", '9', '9', KEY_NORMAL));
+      put(cx[0], y4, cw, rh, KS(L"/"));
+      put(cx[1], y4, cw, rh, KS(L"@"));
+      put(cx[2], y4, cw, rh, K(L"0", '0', '0', KEY_NORMAL));
+      put(cx[3], y4, cw, rh, KS(L"."));
+      put(cx[4], y4, cw, rh,
+          K(L"返回", 0, 0, KEY_PAGE, 1, false, nullptr, nullptr, true,
+            PAGE_LETTERS));
+      break;
+    }
+    case PAGE_SYMBOLS: {
+      const int th = _Scaled(38);
+      int y = top + pad;
+      const int tw = (full_w - gap * 4) / 5;
+      {
+        int x = pad;
+        for (int i = 0; i < 5; ++i) {
+          const int w = (i == 4) ? (pad + full_w - x) : tw;
+          put(x, y, w, th,
+              K(kSymbolCatNames[i], 0, 0, KEY_SYM_TAB, 1, true, nullptr,
+                nullptr, false, i));
+          x += tw + gap;
+        }
+      }
+      y += th + gap;
+      const int bottom_h = _Scaled(42);
+      int grid_h = rc.Height() - y - pad - bottom_h - gap;
+      if (grid_h < _Scaled(60))
+        grid_h = _Scaled(60);
+      const int gh = (grid_h - gap * 2) / 3;
+      const int gw = (full_w - gap * 5) / 6;
+      int gy = y;
+      for (int r = 0; r < 3; ++r) {
+        int gx = pad;
+        for (int c = 0; c < 6; ++c) {
+          put(gx, gy, gw, gh, KS(kSymbolTable[m_symbol_cat][r * 6 + c]));
+          gx += gw + gap;
+        }
+        gy += gh + gap;
+      }
+      const int by = rc.Height() - pad - bottom_h;
+      const int bw = _Scaled(96);
+      put(rc.right - pad - bw, by, bw, bottom_h,
+          K(L"返回", 0, 0, KEY_PAGE, 1, false, nullptr, nullptr, true,
+            PAGE_LETTERS));
+      break;
+    }
+    case PAGE_EDIT: {
+      int rh = (rc.Height() - top - pad * 2 - gap * 2) / 3;
+      if (rh < _Scaled(40))
+        rh = _Scaled(40);
+      int y = top + pad;
+      row(kEditR1, 5, pad, full_w, y, rh);
+      y += rh + gap;
+      row(kEditR2, 5, pad, full_w, y, rh);
+      y += rh + gap;
+      row(kEditR3, 5, pad, full_w, y, rh);
+      break;
+    }
+    case PAGE_CLIPBOARD: {
+      const int hh = _Scaled(44);
+      int y = top + pad;
+      const int back_w = _Scaled(64);
+      put(pad, y, back_w, hh,
+          K(L"返回", 0, 0, KEY_PAGE, 1, true, nullptr, nullptr, false,
+            PAGE_LETTERS));
+      const int clear_w = _Scaled(72);
+      put(rc.right - pad - clear_w, y, clear_w, hh,
+          K(L"清空", 0, 0, KEY_CLIP_CLEAR, 1, true));
+      y += hh + gap;
+      const int item_h = _Scaled(56);
+      int history = 0;
+      {
+        std::lock_guard<std::mutex> lock(m_data_mutex);
+        history = (int)m_history.size();
+      }
+      int max_items = (rc.Height() - y - pad + gap) / (item_h + gap);
+      if (max_items < 0)
+        max_items = 0;
+      int shown = (history < max_items) ? history : max_items;
+      for (int i = 0; i < shown; ++i) {
+        KeyDef def;
+        def.action = KEY_CLIP_ITEM;
+        def.payload = i;
+        {
+          std::lock_guard<std::mutex> lock(m_data_mutex);
+          if (i < (int)m_history.size())
+            def.text = m_history[i];
+        }
+        put(pad, y + i * (item_h + gap), full_w, item_h, def);
+      }
+      break;
+    }
   }
 }
 
@@ -774,12 +1067,9 @@ int WeaselKeyboard::_CandidateAt(CPoint pt) const {
   return -1;
 }
 
-int WeaselKeyboard::_ToolAt(CPoint pt) const {
-  for (const auto& entry : m_toolbar_rects) {
-    if (entry.first.PtInRect(pt))
-      return entry.second;
-  }
-  return -1;
+bool WeaselKeyboard::_CurrentAsciiMode() const {
+  std::lock_guard<std::mutex> lock(m_data_mutex);
+  return m_status.ascii_mode;
 }
 
 void WeaselKeyboard::ShowHint(const std::wstring& hint) {
@@ -795,94 +1085,284 @@ void WeaselKeyboard::ShowHint(const std::wstring& hint) {
   }
 }
 
-bool WeaselKeyboard::_CurrentAsciiMode() const {
-  std::lock_guard<std::mutex> lock(m_data_mutex);
-  return m_status.ascii_mode;
+void WeaselKeyboard::SendCtrlKey(WORD vk) {
+  INPUT inputs[4] = {};
+  inputs[0].type = INPUT_KEYBOARD;
+  inputs[0].ki.wVk = VK_CONTROL;
+  inputs[1].type = INPUT_KEYBOARD;
+  inputs[1].ki.wVk = vk;
+  inputs[2].type = INPUT_KEYBOARD;
+  inputs[2].ki.wVk = vk;
+  inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+  inputs[3].type = INPUT_KEYBOARD;
+  inputs[3].ki.wVk = VK_CONTROL;
+  inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+  ::SendInput(4, inputs, sizeof(INPUT));
+}
+
+void WeaselKeyboard::_InjectVkKey(WORD vk, bool shift) {
+  INPUT inputs[4] = {};
+  int n = 0;
+  if (shift) {
+    inputs[n].type = INPUT_KEYBOARD;
+    inputs[n].ki.wVk = VK_SHIFT;
+    ++n;
+  }
+  inputs[n].type = INPUT_KEYBOARD;
+  inputs[n].ki.wVk = vk;
+  ++n;
+  inputs[n].type = INPUT_KEYBOARD;
+  inputs[n].ki.wVk = vk;
+  inputs[n].ki.dwFlags = KEYEVENTF_KEYUP;
+  ++n;
+  if (shift) {
+    inputs[n].type = INPUT_KEYBOARD;
+    inputs[n].ki.wVk = VK_SHIFT;
+    inputs[n].ki.dwFlags = KEYEVENTF_KEYUP;
+    ++n;
+  }
+  ::SendInput(n, inputs, sizeof(INPUT));
+}
+
+void WeaselKeyboard::_InjectUnicode(const std::wstring& text) {
+  for (wchar_t ch : text) {
+    INPUT inputs[2] = {};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wScan = ch;
+    inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wScan = ch;
+    inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+    ::SendInput(2, inputs, sizeof(INPUT));
+  }
 }
 
 void WeaselKeyboard::_ActivateKey(int key_index) {
   if (key_index < 0 || key_index >= (int)m_keys.size())
     return;
-  const KeyDef& def = _DefById(m_keys[key_index].id);
+  const KeyDef& def = m_defs[m_keys[key_index].def];
+  auto switch_page = [&](int page) {
+    m_page = (Page)page;
+    m_shift = false;
+    m_select = false;
+    if (m_page == PAGE_CLIPBOARD)
+      _PollClipboard();
+    _Layout();
+    _Render();
+  };
+  auto engine_key = [&](UINT ibus_code, bool shift) -> bool {
+    weasel::KeyEvent event(ibus_code, 0);
+    if (shift)
+      event.mask |= ibus::SHIFT_MASK;
+    return m_key_handler && m_key_handler(event);
+  };
   switch (def.action) {
     case KEY_SHIFT:
       m_shift = !m_shift;
+      _Render();
       return;
-    case KEY_TOGGLE_MODE:
+    case KEY_SELECT:
+      m_select = !m_select;
+      _Render();
+      return;
+    case KEY_MODE:
       if (m_mode_toggle_handler)
         m_mode_toggle_handler(_CurrentAsciiMode());
       return;
+    case KEY_TOOL_CLIPBOARD:
+      switch_page(m_page == PAGE_CLIPBOARD ? PAGE_LETTERS : PAGE_CLIPBOARD);
+      return;
+    case KEY_TOOL_EDIT:
+      switch_page(m_page == PAGE_EDIT ? PAGE_LETTERS : PAGE_EDIT);
+      return;
+    case KEY_DISMISS:
+      if (m_dismiss_handler)
+        m_dismiss_handler();
+      else
+        Hide();
+      return;
+    case KEY_PAGE:
+      switch_page(def.payload);
+      return;
+    case KEY_SYM_TAB:
+      m_symbol_cat = def.payload;
+      _Layout();
+      _Render();
+      return;
+    case KEY_CLIP_CLEAR: {
+      std::lock_guard<std::mutex> lock(m_data_mutex);
+      m_history.clear();
+    }
+      _Layout();
+      _Render();
+      return;
+    case KEY_CLIP_ITEM:
+      _PasteClipboardItem((size_t)def.payload);
+      return;
+    case KEY_SELECT_ALL:
+      SendCtrlKey('A');
+      return;
+    case KEY_COPY:
+      SendCtrlKey('C');
+      return;
+    case KEY_CUT:
+      SendCtrlKey('X');
+      return;
+    case KEY_PASTE:
+      SendCtrlKey('V');
+      return;
+    case KEY_TAB:
+      _InjectVkKey(VK_TAB, false);
+      return;
+    case KEY_HOME:
+      _InjectVkKey(VK_HOME, false);
+      return;
+    case KEY_END:
+      _InjectVkKey(VK_END, false);
+      return;
+    case KEY_DELETE:
+      _InjectVkKey(VK_DELETE, false);
+      return;
+    case KEY_BACKSPACE:
+      if (!engine_key(ibus::BackSpace, false))
+        _InjectVkKey(VK_BACK, false);
+      return;
+    case KEY_ENTER:
+      if (!engine_key(ibus::Return, false))
+        _InjectVkKey(VK_RETURN, false);
+      return;
+    case KEY_SPACE:
+      if (!engine_key(ibus::space, false))
+        _InjectVkKey(VK_SPACE, false);
+      return;
+    case KEY_ARROW: {
+      const bool shift = m_select;
+      if (!engine_key(def.ibus_code, shift))
+        _InjectVkKey((WORD)def.vk, shift);
+      return;
+    }
     default:
       break;
   }
-  weasel::KeyEvent event(def.ibus_code, 0);
+  // KEY_NORMAL
   const bool is_alpha = def.ibus_code >= 'a' && def.ibus_code <= 'z';
-  const bool need_shift = (is_alpha && m_shift);
-  if (need_shift) {
-    event.mask |= ibus::SHIFT_MASK;
-    if (is_alpha)
+  const bool shift = is_alpha && m_shift;
+  bool handled = false;
+  if (def.ibus_code) {
+    weasel::KeyEvent event(def.ibus_code, 0);
+    if (shift) {
       event.keycode = def.ibus_code - 'a' + 'A';
+      event.mask |= ibus::SHIFT_MASK;
+    }
+    handled = m_key_handler && m_key_handler(event);
   }
-  const bool handled = m_key_handler && m_key_handler(event);
-  if (!handled && def.vk) {
-    _InjectKey(def, need_shift);
+  if (!handled) {
+    if (def.vk)
+      _InjectVkKey((WORD)def.vk, shift);
+    else if (!def.text.empty())
+      _InjectUnicode(def.text);
   }
-  if (is_alpha && m_shift)
+  if (shift)
     m_shift = false;
 }
 
-void WeaselKeyboard::_InjectKey(const KeyDef& def, bool shift) {
-  if (!def.vk)
+void WeaselKeyboard::_PollClipboard() {
+  DWORD seq = ::GetClipboardSequenceNumber();
+  if (seq == m_clip_seq)
     return;
-  std::vector<INPUT> inputs;
-  INPUT input = {};
-  input.type = INPUT_KEYBOARD;
-  if (shift) {
-    input.ki.wVk = VK_SHIFT;
-    inputs.push_back(input);
+  m_clip_seq = seq;
+  if (!::OpenClipboard(m_hWnd))
+    return;
+  HANDLE data = ::GetClipboardData(CF_UNICODETEXT);
+  if (data) {
+    const wchar_t* src = static_cast<const wchar_t*>(::GlobalLock(data));
+    if (src) {
+      std::wstring text(src);
+      if (text.size() > kMaxClipLength)
+        text.resize(kMaxClipLength);
+      ::GlobalUnlock(data);
+      for (auto& ch : text) {
+        if (ch == L'\r' || ch == L'\n')
+          ch = L' ';
+      }
+      while (!text.empty() && text.back() == L' ')
+        text.pop_back();
+      _AddClipboardText(text);
+    }
   }
-  input.ki.wVk = (WORD)def.vk;
-  input.ki.dwFlags = 0;
-  inputs.push_back(input);
-  input.ki.dwFlags = KEYEVENTF_KEYUP;
-  inputs.push_back(input);
-  if (shift) {
-    input.ki.wVk = VK_SHIFT;
-    input.ki.dwFlags = KEYEVENTF_KEYUP;
-    inputs.push_back(input);
-  }
-  ::SendInput((UINT)inputs.size(), inputs.data(), sizeof(INPUT));
+  ::CloseClipboard();
 }
 
-void WeaselKeyboard::SendCtrlKey(WORD vk) {
-  std::vector<INPUT> inputs(4);
-  INPUT input = {};
-  input.type = INPUT_KEYBOARD;
-  input.ki.wVk = VK_CONTROL;
-  inputs[0] = input;
-  input.ki.wVk = vk;
-  inputs[1] = input;
-  input.ki.dwFlags = KEYEVENTF_KEYUP;
-  inputs[2] = input;
-  input.ki.wVk = VK_CONTROL;
-  inputs[3] = input;
-  ::SendInput((UINT)inputs.size(), inputs.data(), sizeof(INPUT));
+void WeaselKeyboard::_AddClipboardText(const std::wstring& text) {
+  if (text.empty())
+    return;
+  bool refresh = false;
+  {
+    std::lock_guard<std::mutex> lock(m_data_mutex);
+    for (auto it = m_history.begin(); it != m_history.end(); ++it) {
+      if (*it == text) {
+        m_history.erase(it);
+        break;
+      }
+    }
+    m_history.insert(m_history.begin(), text);
+    if (m_history.size() > kMaxClipItems)
+      m_history.resize(kMaxClipItems);
+    refresh = (m_page == PAGE_CLIPBOARD);
+  }
+  if (refresh) {
+    _Layout();
+    _Render();
+  }
+}
+
+void WeaselKeyboard::_PasteClipboardItem(size_t index) {
+  std::wstring text;
+  {
+    std::lock_guard<std::mutex> lock(m_data_mutex);
+    if (index >= m_history.size())
+      return;
+    text = m_history[index];
+  }
+  if (::OpenClipboard(m_hWnd)) {
+    ::EmptyClipboard();
+    const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL mem = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (mem) {
+      void* dst = ::GlobalLock(mem);
+      if (dst) {
+        memcpy(dst, text.c_str(), bytes);
+        ::GlobalUnlock(mem);
+      }
+      ::SetClipboardData(CF_UNICODETEXT, mem);
+    }
+    ::CloseClipboard();
+  }
+  SendCtrlKey('V');
+  m_page = PAGE_LETTERS;
+  m_shift = false;
+  m_select = false;
+  _Layout();
+  _Render();
 }
 
 void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
   weasel::Context ctx;
   weasel::Status status;
   std::wstring hint;
+  size_t history_count = 0;
   {
     std::lock_guard<std::mutex> lock(m_data_mutex);
     ctx = m_ctx;
     status = m_status;
     hint = m_hint;
+    history_count = m_history.size();
   }
 
-  const int pad = _Scaled(8);
-  const int gap = _Scaled(8);
+  const int pad = _Scaled(6);
+  const int gap = _Scaled(7);
   const int strip_top = m_grip_h;
+  const int toolbar_top = m_grip_h + m_strip_h;
   const float width = (float)rc.Width();
   const float height = (float)rc.Height();
   const float key_radius = (float)_Scaled(10);
@@ -915,7 +1395,7 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
         pill_h / 2.0f, m_resizing ? kColorAccent : kColorGrip);
   }
 
-  // Candidate strip.
+  // Candidate strip background.
   {
     Gdiplus::SolidBrush strip_brush(kColorStrip);
     g.FillRectangle(&strip_brush, Gdiplus::RectF(0.0f, (float)strip_top, width,
@@ -926,101 +1406,21 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
         Gdiplus::RectF(0.0f, (float)(strip_top + m_strip_h - 1), width, 1.0f));
   }
 
-  // Dismiss key (hide the keyboard), left edge of the candidate strip.
+  // Toolbar background.
   {
-    const Gdiplus::RectF rect(
-        (float)m_dismiss_rect.left, (float)m_dismiss_rect.top,
-        (float)m_dismiss_rect.Width(), (float)m_dismiss_rect.Height());
-    _FillRoundedRect(g, rect, chip_radius,
-                     m_pressed_dismiss ? kColorKeyPressed : kColorKeyFn);
-    const float cx = rect.X + rect.Width / 2.0f;
-    const float cy = rect.Y + rect.Height / 2.0f;
-    const float s = 6.0f * dpi_scale;
-    Gdiplus::Pen pen(kColorSubText, 2.0f * dpi_scale);
-    pen.SetStartCap(Gdiplus::LineCapRound);
-    pen.SetEndCap(Gdiplus::LineCapRound);
-    pen.SetLineJoin(Gdiplus::LineJoinRound);
-    Gdiplus::GraphicsPath path;
-    path.AddLine(cx - s, cy - s * 0.35f, cx, cy + s * 0.45f);
-    path.AddLine(cx, cy + s * 0.45f, cx + s, cy - s * 0.35f);
-    g.DrawPath(&pen, &path);
-  }
-
-  // Toolbar strip: small icon buttons between the candidate strip and the
-  // letter rows (clipboard / edit / voice), like the phone keyboards.
-  {
-    const int band_top = m_grip_h + m_strip_h;
     Gdiplus::SolidBrush band_brush(kColorStrip);
-    g.FillRectangle(&band_brush, Gdiplus::RectF(0.0f, (float)band_top, width,
+    g.FillRectangle(&band_brush, Gdiplus::RectF(0.0f, (float)toolbar_top, width,
                                                 (float)m_toolbar_h));
     Gdiplus::SolidBrush line_brush(kColorLine);
-    g.FillRectangle(
-        &line_brush,
-        Gdiplus::RectF(0.0f, (float)(band_top + m_toolbar_h - 1), width, 1.0f));
-    for (const auto& entry : m_toolbar_rects) {
-      const int tool = entry.second;
-      const bool pressed = (tool == m_pressed_tool);
-      const Gdiplus::RectF rect((float)entry.first.left, (float)entry.first.top,
-                                (float)entry.first.Width(),
-                                (float)entry.first.Height());
-      _FillRoundedRect(g, rect, chip_radius,
-                       pressed ? kColorKeyPressed : kColorKeyFn);
-      const float cx = rect.X + rect.Width / 2.0f;
-      const float cy = rect.Y + rect.Height / 2.0f;
-      const float s = 7.0f * dpi_scale;
-      Gdiplus::Pen pen(pressed ? kColorAccent : kColorSubText,
-                       1.8f * dpi_scale);
-      pen.SetStartCap(Gdiplus::LineCapRound);
-      pen.SetEndCap(Gdiplus::LineCapRound);
-      pen.SetLineJoin(Gdiplus::LineJoinRound);
-      Gdiplus::GraphicsPath path;
-      switch (tool) {
-        case TOOL_CLIPBOARD: {  // clipboard outline with a clip on top
-          path.AddRectangle(Gdiplus::RectF(cx - s * 0.7f, cy - s * 0.4f,
-                                           s * 1.4f, s * 1.35f));
-          path.StartFigure();
-          path.AddLine(cx - s * 0.3f, cy - s * 0.85f, cx + s * 0.3f,
-                       cy - s * 0.85f);
-          path.AddLine(cx + s * 0.3f, cy - s * 0.85f, cx + s * 0.3f,
-                       cy - s * 0.45f);
-          path.AddLine(cx - s * 0.3f, cy - s * 0.45f, cx - s * 0.3f,
-                       cy - s * 0.85f);
-          break;
-        }
-        case TOOL_EDIT: {  // four-way arrow cluster
-          path.AddLine(cx, cy - s, cx + s * 0.9f, cy);
-          path.AddLine(cx + s * 0.9f, cy, cx, cy + s);
-          path.AddLine(cx, cy + s, cx - s * 0.9f, cy);
-          path.AddLine(cx - s * 0.9f, cy, cx, cy - s);
-          break;
-        }
-        case TOOL_VOICE: {  // microphone
-          path.AddArc(
-              Gdiplus::RectF(cx - s * 0.45f, cy - s, s * 0.9f, s * 0.9f),
-              180.0f, 180.0f);
-          path.AddLine(cx - s * 0.45f, cy - s * 0.55f, cx - s * 0.45f,
-                       cy - s * 0.35f);
-          path.AddLine(cx - s * 0.45f, cy - s * 0.35f, cx - s * 0.85f,
-                       cy - s * 0.1f);
-          path.AddLine(cx - s * 0.85f, cy + s * 0.75f, cx + s * 0.85f,
-                       cy + s * 0.75f);
-          path.AddLine(cx + s * 0.85f, cy - s * 0.1f, cx + s * 0.45f,
-                       cy - s * 0.35f);
-          path.AddLine(cx + s * 0.45f, cy - s * 0.35f, cx + s * 0.45f,
-                       cy - s * 0.55f);
-          break;
-        }
-        default:
-          break;
-      }
-      g.DrawPath(&pen, &path);
-    }
+    g.FillRectangle(&line_brush,
+                    Gdiplus::RectF(0.0f, (float)(toolbar_top + m_toolbar_h - 1),
+                                   width, 1.0f));
   }
 
-  // Composition and candidates.
+  // Candidate strip content.
   m_candidate_rects.clear();
   {
-    float x = (float)(m_dismiss_rect.right + gap);
+    float x = (float)pad;
     const float area_right = width - (float)pad;
     const float chip_h = (float)_Scaled(34);
     const float chip_y = (float)strip_top + ((float)m_strip_h - chip_h) / 2.0f;
@@ -1082,29 +1482,64 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
     }
   }
 
-  // Keys.
+  // Keys (toolbar chips and page content).
   for (size_t i = 0; i < m_keys.size(); ++i) {
     const KeyLayout& key = m_keys[i];
-    const KeyDef& def = _DefById(key.id);
+    const KeyDef& def = m_defs[key.def];
     const bool pressed = ((int)i == m_pressed_key);
-    const bool voice_space = (def.action == KEY_SPACE && m_voice_active);
-    const bool shift_on = (def.action == KEY_SHIFT && m_shift);
     const Gdiplus::RectF rect((float)key.rect.left, (float)key.rect.top,
                               (float)key.rect.Width(),
                               (float)key.rect.Height());
-    Gdiplus::Color bg = def.is_fn ? kColorKeyFn : kColorKey;
+    const float cx = (rect.X + rect.GetRight()) / 2.0f;
+    const float cy = (rect.Y + rect.GetBottom()) / 2.0f;
+
+    // Toolbar chips.
+    if (def.action == KEY_TOOL_CLIPBOARD || def.action == KEY_TOOL_EDIT ||
+        def.action == KEY_DISMISS) {
+      const bool active =
+          (def.action == KEY_TOOL_CLIPBOARD && m_page == PAGE_CLIPBOARD) ||
+          (def.action == KEY_TOOL_EDIT && m_page == PAGE_EDIT);
+      Gdiplus::Color bg = active ? kColorAccentSoft : kColorKeyFn;
+      if (pressed)
+        bg = kColorKeyPressed;
+      _FillRoundedRect(g, rect, chip_radius, bg);
+      const Gdiplus::Color ic = active ? kColorAccent : kColorSubText;
+      const float s = (float)_Scaled(9);
+      if (def.action == KEY_TOOL_CLIPBOARD)
+        _DrawScissorsIcon(g, cx, cy, s, ic);
+      else if (def.action == KEY_TOOL_EDIT)
+        _DrawEditIcon(g, cx, cy, s, ic);
+      else
+        _DrawChevronDown(g, cx, cy, s, ic);
+      continue;
+    }
+
+    // Style resolution.
+    Gdiplus::Color bg = kColorKey;
     Gdiplus::Color fg = kColorText;
-    if (voice_space) {
+    if (def.action == KEY_CLIP_ITEM) {
+      bg = pressed ? kColorAccentSoft : kColorCard;
+      fg = pressed ? kColorAccent : kColorText;
+    } else if (def.is_primary) {
       bg = kColorAccent;
       fg = kColorWhite;
-    } else if (shift_on) {
+    } else if (def.action == KEY_SPACE && m_voice_active) {
+      bg = kColorAccent;
+      fg = kColorWhite;
+    } else if ((def.action == KEY_SHIFT && m_shift) ||
+               (def.action == KEY_SELECT && m_select) ||
+               (def.action == KEY_SYM_TAB && def.payload == m_symbol_cat)) {
       bg = kColorAccentSoft;
       fg = kColorAccent;
     } else if (pressed) {
       bg = kColorKeyPressed;
+    } else if (def.is_fn) {
+      bg = kColorKeyFn;
     }
     _FillRoundedRect(g, rect, key_radius, bg);
-    if (!def.is_fn && !pressed && !voice_space) {
+    const bool want_border =
+        (def.action == KEY_NORMAL || def.action == KEY_CLIP_ITEM) && !pressed;
+    if (want_border) {
       Gdiplus::GraphicsPath border_path;
       _AddRoundedRectPath(border_path, rect, key_radius);
       int border_width = _Scaled(1);
@@ -1114,14 +1549,81 @@ void WeaselKeyboard::_Draw(Gdiplus::Graphics& g, const CRect& rc) {
       g.DrawPath(&border_pen, &border_path);
     }
 
+    // Content.
+    if (def.action == KEY_ARROW) {
+      const Gdiplus::Color color = m_select ? kColorAccent : fg;
+      _DrawChevron(g, key.rect, def.ibus_code, color, dpi_scale);
+      continue;
+    }
+    if (def.action == KEY_BACKSPACE) {
+      _DrawBackspaceIcon(
+          g, cx, cy, (float)_Scaled(9),
+          (def.is_primary || (def.action == KEY_SPACE && m_voice_active))
+              ? fg
+              : kColorText);
+      continue;
+    }
+    if (def.action == KEY_CLIP_ITEM) {
+      _DrawTextInRect(
+          g, def.text, m_font_candidate.get(),
+          Gdiplus::RectF(rect.X + (float)_Scaled(16), rect.Y,
+                         rect.Width() - (float)_Scaled(24), rect.Height()),
+          fg, Gdiplus::StringAlignmentNear);
+      continue;
+    }
     std::wstring label = def.label;
-    if (def.action == KEY_TOGGLE_MODE)
-      label = status.ascii_mode ? L"英" : L"中";
-    else if (def.action == KEY_SPACE)
+    if (def.action == KEY_SPACE)
       label = m_voice_active ? L"松开结束" : L"按住说话";
-    const bool single_letter =
-        (def.action == KEY_NORMAL && !def.is_fn && def.label[1] == 0);
-    _DrawTextInRect(
-        g, label, single_letter ? m_font_key.get() : m_font_fn.get(), rect, fg);
+    Gdiplus::Font* font = m_font_fn.get();
+    if (def.action == KEY_NORMAL && label.size() == 1) {
+      font = (label[0] < 128) ? m_font_key.get() : m_font_candidate.get();
+    }
+    _DrawTextInRect(g, label, font, rect, fg);
+    if (def.hint_left) {
+      _DrawTextInRect(
+          g, def.hint_left, m_font_tiny.get(),
+          Gdiplus::RectF(rect.X + (float)_Scaled(6), rect.Y + (float)_Scaled(2),
+                         rect.Width() - (float)_Scaled(12), (float)_Scaled(16)),
+          kColorSubText, Gdiplus::StringAlignmentNear,
+          Gdiplus::StringAlignmentNear);
+    }
+    if (def.hint_right) {
+      _DrawTextInRect(
+          g, def.hint_right, m_font_tiny.get(),
+          Gdiplus::RectF(rect.X + (float)_Scaled(6), rect.Y + (float)_Scaled(2),
+                         rect.Width() - (float)_Scaled(12), (float)_Scaled(16)),
+          kColorSubText, Gdiplus::StringAlignmentFar,
+          Gdiplus::StringAlignmentNear);
+    }
+  }
+
+  // Clipboard page chrome (title, count, empty hint).
+  if (m_page == PAGE_CLIPBOARD) {
+    const int top = m_grip_h + m_strip_h + m_toolbar_h;
+    const int hh = _Scaled(44);
+    const int back_w = _Scaled(64);
+    const float title_x = (float)(pad + back_w + _Scaled(10));
+    _DrawTextInRect(g, L"剪贴板", m_font_candidate.get(),
+                    Gdiplus::RectF(title_x, (float)(top + pad),
+                                   (float)_Scaled(90), (float)hh),
+                    kColorText, Gdiplus::StringAlignmentNear);
+    if (history_count) {
+      _DrawTextInRect(
+          g,
+          std::to_wstring(history_count) + L"/" +
+              std::to_wstring(kMaxClipItems),
+          m_font_tiny.get(),
+          Gdiplus::RectF(title_x + (float)_Scaled(78), (float)(top + pad),
+                         (float)_Scaled(80), (float)hh),
+          kColorSubText, Gdiplus::StringAlignmentNear);
+    }
+    if (!history_count) {
+      _DrawTextInRect(
+          g, L"复制过的内容会出现在这里", m_font_hint.get(),
+          Gdiplus::RectF((float)(pad + _Scaled(10)),
+                         (float)(top + pad + hh + gap),
+                         width - (float)(pad * 2), (float)_Scaled(56)),
+          kColorSubText, Gdiplus::StringAlignmentNear);
+    }
   }
 }

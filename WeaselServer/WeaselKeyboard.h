@@ -15,17 +15,57 @@
 #include <utility>
 #include <vector>
 
-struct KeyDef;
+enum KeyAction {
+  KEY_NORMAL = 0,
+  KEY_SHIFT,
+  KEY_BACKSPACE,
+  KEY_DELETE,
+  KEY_ENTER,
+  KEY_SPACE,
+  KEY_TAB,
+  KEY_HOME,
+  KEY_END,
+  KEY_ARROW,
+  KEY_SELECT,
+  KEY_SELECT_ALL,
+  KEY_COPY,
+  KEY_CUT,
+  KEY_PASTE,
+  KEY_MODE,
+  KEY_PAGE,
+  KEY_SYM_TAB,
+  KEY_CLIP_ITEM,
+  KEY_CLIP_CLEAR,
+  KEY_TOOL_CLIPBOARD,
+  KEY_TOOL_EDIT,
+  KEY_DISMISS,
+};
+
+struct KeyDef {
+  const wchar_t* label = L"";
+  std::wstring text;
+  UINT ibus_code = 0;
+  UINT vk = 0;
+  int action = KEY_NORMAL;
+  float weight = 1.0f;
+  bool is_fn = false;
+  bool is_primary = false;
+  const wchar_t* hint_left = nullptr;
+  const wchar_t* hint_right = nullptr;
+  int payload = 0;
+};
 
 typedef CWinTraits<WS_POPUP,
                    WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE |
                        WS_EX_LAYERED>
     CKeyboardTraits;
 
-// A phone-style soft keyboard owned by WeaselServer. It renders with GDI+ onto
-// a layered window (per-pixel alpha, rounded top corners), processes keys into
-// the active Rime session, and shows the current composition above the keys.
-// The grip strip along the top edge can be dragged to resize the height.
+// A phone-style soft keyboard owned by WeaselServer, laid out after common
+// phone IMEs (letter / number / symbol / edit / clipboard pages). It renders
+// with GDI+ onto a layered window (per-pixel alpha, rounded top corners),
+// processes keys into the active Rime session, and shows the current
+// composition above the keys. The grip strip along the top edge can be
+// dragged to resize the height.
 class WeaselKeyboard
     : public CWindowImpl<WeaselKeyboard, CWindow, CKeyboardTraits> {
  public:
@@ -33,12 +73,15 @@ class WeaselKeyboard
     WM_APP_CONTEXT_UPDATE = WM_APP + 42,
     TIMER_LONGPRESS = 1,
     TIMER_HINT = 2,
+    TIMER_CLIPBOARD = 3,
   };
 
-  enum ToolButton {
-    TOOL_CLIPBOARD = 0,
-    TOOL_EDIT,
-    TOOL_VOICE,
+  enum Page {
+    PAGE_LETTERS = 0,
+    PAGE_NUMBERS,
+    PAGE_SYMBOLS,
+    PAGE_EDIT,
+    PAGE_CLIPBOARD,
   };
 
   BEGIN_MSG_MAP(WeaselKeyboard)
@@ -79,10 +122,6 @@ class WeaselKeyboard
   void SetModeToggleHandler(std::function<void(bool)> handler) {
     m_mode_toggle_handler = std::move(handler);
   }
-  // Toolbar buttons above the letter rows (clipboard / edit / voice).
-  void SetToolHandler(std::function<void(int)> handler) {
-    m_tool_handler = std::move(handler);
-  }
   // Called when the dismiss key is tapped (default: hide the keyboard).
   void SetDismissHandler(std::function<void()> handler) {
     m_dismiss_handler = std::move(handler);
@@ -91,8 +130,7 @@ class WeaselKeyboard
   // Show a transient hint in the candidate strip; auto-clears after a while.
   void ShowHint(const std::wstring& hint);
 
-  // Inject a Ctrl+key combination into the focused application. Also used by
-  // the tool panel (cut/copy/paste/select all).
+  // Inject a Ctrl+key combination into the focused application.
   static void SendCtrlKey(WORD vk);
 
   // Thread-safe: may be called from IPC worker threads.
@@ -139,7 +177,7 @@ class WeaselKeyboard
  private:
   struct KeyLayout {
     CRect rect;
-    int id;
+    int def;
   };
 
   int _Scaled(int value) const;
@@ -150,36 +188,42 @@ class WeaselKeyboard
   void _EnsureBackBuffer(int width, int height);
   void _ReleaseBackBuffer();
   void _ActivateKey(int key_index);
-  void _InjectKey(const KeyDef& def, bool shift);
+  void _InjectVkKey(WORD vk, bool shift);
+  void _InjectUnicode(const std::wstring& text);
   // Shared press handling for mouse and touch input.
   void _PointerDown(CPoint pt);
   void _PointerUp(CPoint pt);
   void _PointerMove();
   int _KeyAt(CPoint pt) const;
   int _CandidateAt(CPoint pt) const;
-  int _ToolAt(CPoint pt) const;
   bool _CurrentAsciiMode() const;
   void _Draw(Gdiplus::Graphics& g, const CRect& rc);
+  void _PollClipboard();
+  void _AddClipboardText(const std::wstring& text);
+  void _PasteClipboardItem(size_t index);
 
   std::vector<KeyLayout> m_keys;
+  std::vector<KeyDef> m_defs;
   std::vector<std::pair<CRect, size_t>> m_candidate_rects;
-  std::vector<std::pair<CRect, int>> m_toolbar_rects;
   CRect m_grip_rect;
-  CRect m_dismiss_rect;
   int m_grip_h = 0;
   int m_strip_h = 0;
   int m_toolbar_h = 0;
 
+  Page m_page = PAGE_LETTERS;
+  int m_symbol_cat = 0;
+
   std::function<bool(weasel::KeyEvent const&)> m_key_handler;
   std::function<void(size_t)> m_select_handler;
   std::function<void(bool)> m_mode_toggle_handler;
-  std::function<void(int)> m_tool_handler;
   std::function<void()> m_dismiss_handler;
 
   mutable std::mutex m_data_mutex;
   weasel::Context m_ctx;
   weasel::Status m_status;
   std::wstring m_hint;
+  std::vector<std::wstring> m_history;
+  DWORD m_clip_seq = 0;
 
   // Keyboard height in logical (96 dpi) units; persisted on resize.
   int m_height96 = 0;
@@ -189,11 +233,10 @@ class WeaselKeyboard
 
   UINT m_dpi = 96;
   bool m_shift = false;
+  bool m_select = false;
   bool m_voice_active = false;
   int m_pressed_key = -1;
   int m_pressed_candidate = -1;
-  int m_pressed_tool = -1;
-  bool m_pressed_dismiss = false;
   UINT_PTR m_longpress_timer = 0;
   UINT_PTR m_hint_timer = 0;
 
@@ -218,4 +261,5 @@ class WeaselKeyboard
   std::unique_ptr<Gdiplus::Font> m_font_candidate;
   std::unique_ptr<Gdiplus::Font> m_font_preedit;
   std::unique_ptr<Gdiplus::Font> m_font_hint;
+  std::unique_ptr<Gdiplus::Font> m_font_tiny;
 };

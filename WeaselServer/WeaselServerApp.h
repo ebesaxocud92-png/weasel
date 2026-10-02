@@ -13,7 +13,6 @@
 
 #include "WeaselTrayIcon.h"
 #include "WeaselKeyboard.h"
-#include "WeaselToolPanel.h"
 
 namespace fs = std::filesystem;
 
@@ -68,7 +67,6 @@ class WeaselServerApp {
   weasel::Server m_server;
   weasel::UI m_ui;
   WeaselKeyboard m_keyboard;
-  WeaselToolPanel m_tool_panel;
   // Set when the user hides the keyboard manually: suppresses auto-show
   // until focus leaves the current text field.
   bool m_keyboard_suppressed = false;

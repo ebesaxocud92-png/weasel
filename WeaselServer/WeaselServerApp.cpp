@@ -59,35 +59,8 @@ int WeaselServerApp::Run() {
     m_keyboard.OnEngineUpdate(session_id, ctx, status);
   });
 
-  // The tool panel shares the keyboard's engine entry point (edit keys may
-  // need candidate navigation while composing).
-  m_tool_panel.Create(m_server.GetHWnd());
-  m_tool_panel.SetAnchorWindow(m_keyboard.Hwnd());
-  m_tool_panel.SetKeyHandler([this](weasel::KeyEvent const& key_event) {
-    BOOL handled = FALSE;
-    m_server.InvokeHandlerAction(
-        [&]() { handled = m_handler->ProcessKeyEventFromKeyboard(key_event); });
-    return handled != FALSE;
-  });
-
-  m_keyboard.SetToolHandler([this](int tool) {
-    switch (tool) {
-      case WeaselKeyboard::TOOL_CLIPBOARD:
-        m_tool_panel.Toggle(WeaselToolPanel::PAGE_CLIPBOARD);
-        break;
-      case WeaselKeyboard::TOOL_EDIT:
-        m_tool_panel.Toggle(WeaselToolPanel::PAGE_EDIT);
-        break;
-      case WeaselKeyboard::TOOL_VOICE:
-        m_keyboard.ShowHint(L"语音输入开发中，即将上线");
-        break;
-      default:
-        break;
-    }
-  });
   m_keyboard.SetDismissHandler([this]() {
     m_keyboard_suppressed = true;
-    m_tool_panel.Hide();
     m_keyboard.Hide();
   });
 
@@ -99,7 +72,6 @@ int WeaselServerApp::Run() {
         m_keyboard.Show();
     } else {
       m_keyboard_suppressed = false;
-      m_tool_panel.Hide();
       m_keyboard.Hide();
     }
   });
@@ -126,7 +98,6 @@ void WeaselServerApp::SetupMenuHandlers() {
   m_server.AddMenuHandler(ID_WEASELTRAY_SOFTKEYBOARD, [this] {
     if (m_keyboard.IsVisible()) {
       m_keyboard_suppressed = true;
-      m_tool_panel.Hide();
       m_keyboard.Hide();
     } else {
       m_keyboard_suppressed = false;
