@@ -529,7 +529,10 @@ void WeaselToolPanel::_Layout() {
     }
     const int row_h = _Scaled(40);
     const int header_h = _Scaled(44);
-    int h = pad + header_h + pad + row_h * std::max(1, history) + pad;
+    int rows = history;
+    if (rows < 1)
+      rows = 1;
+    int h = pad + header_h + pad + row_h * rows + pad;
     if (h > _Scaled(420))
       h = _Scaled(420);
     if (rc.Width() != w || rc.Height() != h) {
@@ -546,7 +549,11 @@ void WeaselToolPanel::_Layout() {
     // History rows.
     const int list_top = pad + header_h;
     const int list_h = rc.Height() - list_top - pad;
-    const int visible = std::max(1, std::min(history, list_h / row_h));
+    int visible = list_h / row_h;
+    if (visible > history)
+      visible = history;
+    if (visible < 1)
+      visible = 1;
     for (int i = 0; i < visible; ++i) {
       m_items.emplace_back(CRect(pad, list_top + i * row_h, rc.right - pad,
                                  list_top + i * row_h + row_h),
